@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
 
 async function request(path, options = {}) {
   const token = localStorage.getItem('authToken')
@@ -12,12 +12,19 @@ async function request(path, options = {}) {
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const error = new Error(payload.message || 'Something went wrong')
+    const error = new Error(payload.message || payload.error || 'Something went wrong')
     error.status = response.status
     error.details = payload
     throw error
   }
   return payload.data ?? payload
+}
+
+export const authApi = {
+  login: (email, password) => request('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  }),
 }
 
 export const cartApi = {

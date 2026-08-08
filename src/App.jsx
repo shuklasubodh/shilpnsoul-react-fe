@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import './App.css'
+import { authApi } from './api'
 
 const products = [
   { id: 12, name: 'Mitti Serving Bowl', craft: 'Blue pottery · Jaipur', price: 79, stock: 8, tone: 'blue', image: 'https://images.unsplash.com/photo-1610701596007-11502861dcfa?auto=format&fit=crop&w=800&q=85' },
@@ -30,7 +31,11 @@ function App() {
   const [view, setView] = useState('shop')
   const [cartOpen, setCartOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [user, setUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('authUser')) }
+    catch { return null }
+  })
+  const isLoggedIn = Boolean(user)
   const [cart, setCart] = useState([{ ...products[0], quantity: 1 }, { ...products[1], quantity: 1 }])
   const [checkoutMode, setCheckoutMode] = useState('guest')
   const [confirmed, setConfirmed] = useState(false)
@@ -52,6 +57,22 @@ function App() {
     .filter((item) => item.quantity > 0))
 
   const go = (next) => { setView(next); setCartOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const login = (session) => {
+    localStorage.setItem('authToken', session.token)
+    localStorage.setItem('authUser', JSON.stringify(session.user))
+    setUser(session.user)
+    setCheckoutMode('customer')
+    setLoginOpen(false)
+    setToast(`Welcome back, ${session.user.first_name}`)
+  }
+  const logout = () => {
+    localStorage.removeItem('authToken')
+    localStorage.removeItem('authUser')
+    setUser(null)
+    setCheckoutMode('guest')
+    if (view === 'orders') go('shop')
+    setToast('You have been signed out')
+  }
 
   return (
     <div className="app-shell">
@@ -66,7 +87,8 @@ function App() {
         </nav>
         <div className="header-actions">
           <button className="icon-button search-button" aria-label="Search"><Icon name="search" /></button>
-          <button className="account-button" onClick={() => isLoggedIn ? go('orders') : setLoginOpen(true)}><Icon name="user"/><span>{isLoggedIn ? 'Hi, Asha' : 'Sign in'}</span></button>
+          <button className="account-button" onClick={() => isLoggedIn ? go('orders') : setLoginOpen(true)}><Icon name="user"/><span>{isLoggedIn ? `Hi, ${user.first_name}` : 'Sign in'}</span></button>
+          {isLoggedIn && <button className="logout-button" onClick={logout}>Log out</button>}
           <button className="icon-button bag-button" onClick={() => setCartOpen(true)} aria-label={`Shopping bag with ${count} items`}><Icon name="bag"/><b>{count}</b></button>
         </div>
       </header>
@@ -84,7 +106,7 @@ function App() {
       </footer>
 
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => go('checkout')} /></>}
-      {loginOpen && <><div className="scrim" onClick={() => setLoginOpen(false)}/><Login close={() => setLoginOpen(false)} success={() => { setIsLoggedIn(true); setCheckoutMode('customer'); setLoginOpen(false); setToast('Welcome back, Asha') }} /></>}
+      {loginOpen && <><div className="scrim" onClick={() => setLoginOpen(false)}/><Login close={() => setLoginOpen(false)} success={login} /></>}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
     </div>
   )
@@ -127,7 +149,20 @@ function Checkout({ cart, total, mode, setMode, isLoggedIn, onLogin, onConfirm, 
 
 function OrderSummary({ cart, total }) { return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map(item => <div className="summary-item" key={item.id}><div><img src={item.image} alt=""/><b>{item.quantity}</b></div><p><strong>{item.name}</strong><span>{item.craft}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<div className="summary-lines"><p><span>Subtotal</span><b>S${total.toFixed(2)}</b></p><p><span>Delivery</span><b>{total >= 150 ? 'Complimentary' : 'S$8.00'}</b></p></div><div className="summary-total"><span>Total <small>SGD</small></span><strong>S${(total + (total >= 150 ? 0 : 8)).toFixed(2)}</strong></div></aside> }
 
-function Login({ close, success }) { return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>Sign in to revisit your orders and saved details.</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>Welcome back</h2><p>Enter your details to continue.</p><form onSubmit={(e) => { e.preventDefault(); success() }}><label>Email address<input required type="email" placeholder="you@example.com" defaultValue="asha@example.com"/></label><label><span>Password <button type="button">Forgot password?</button></span><input required type="password" placeholder="••••••••" defaultValue="password"/></label><button className="primary full">Sign in <Icon name="arrow" size={18}/></button></form><div className="or"><span>or</span></div><p className="signup">New to Shilp & Soul? <button>Create an account</button></p><button className="guest-link" onClick={close}>Continue shopping as guest</button></div></section> }
+function Login({ close, success }) {
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const submit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setSubmitting(true)
+    const data = new FormData(event.currentTarget)
+    try { success(await authApi.login(data.get('email'), data.get('password'))) }
+    catch (loginError) { setError(loginError.message) }
+    finally { setSubmitting(false) }
+  }
+  return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>Sign in to revisit your orders and saved details.</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>Welcome back</h2><p>Enter your details to continue.</p><form onSubmit={submit}><label>Email address<input required name="email" type="email" autoComplete="email" placeholder="you@example.com"/></label><label><span>Password <button type="button">Forgot password?</button></span><input required name="password" type="password" autoComplete="current-password" placeholder="••••••••"/></label>{error && <p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'} {!submitting && <Icon name="arrow" size={18}/>}</button></form><div className="or"><span>or</span></div><p className="signup">New to Shilp & Soul? <button>Create an account</button></p><button className="guest-link" onClick={close}>Continue shopping as guest</button></div></section>
+}
 
 function TrackOrder() { const [found, setFound] = useState(false); return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Enter your order number and the email or phone used at checkout.</p><form onSubmit={(e) => { e.preventDefault(); setFound(true) }}><label>Order number<input required placeholder="SNS-20260801-0001" defaultValue="SNS-20260801-0001"/></label><label>Email or phone<input required placeholder="you@example.com" defaultValue="guest@example.com"/></label><button className="primary full">Track order <Icon name="arrow" size={18}/></button></form>{found && <div className="tracking-result"><div><span>Order status</span><strong>Preparing your pieces</strong></div><div className="progress"><i></i></div><div className="steps"><b>Confirmed</b><b>Preparing</b><span>Dispatched</span><span>Delivered</span></div><p>Estimated dispatch in 1–2 working days.</p></div>}</div></main> }
 
