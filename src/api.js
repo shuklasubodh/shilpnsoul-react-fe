@@ -27,6 +27,17 @@ export const authApi = {
   }),
 }
 
+const listQuery = (sortField) => new URLSearchParams({
+  sort: JSON.stringify([sortField, 'ASC']),
+  range: JSON.stringify([0, 99]),
+  filter: JSON.stringify({ is_active: true }),
+}).toString()
+
+export const catalogApi = {
+  products: () => request(`/products?${listQuery('id')}`),
+  categories: () => request(`/categories?${listQuery('display_order')}`),
+}
+
 export const cartApi = {
   get: () => request('/cart'),
   add: (productId, quantity = 1) => request('/cart/items', { method: 'POST', body: JSON.stringify({ productId, quantity }) }),

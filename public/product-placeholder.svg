@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 900" role="img" aria-labelledby="title description">
+  <title id="title">Product image unavailable</title>
+  <desc id="description">A neutral placeholder with a simple handmade vessel.</desc>
+  <rect width="800" height="900" fill="#e8e2d6"/>
+  <path d="M278 310h244c-8 64-35 102-35 191v110c0 58-37 89-87 89s-87-31-87-89V501c0-89-27-127-35-191Z" fill="#b96849" opacity=".72"/>
+  <path d="M302 310c15-54 51-81 98-81s83 27 98 81" fill="none" stroke="#30483a" stroke-width="18"/>
+  <text x="400" y="790" text-anchor="middle" fill="#5f5a52" font-family="Georgia, serif" font-size="25">shilp &amp; soul</text>
+</svg>

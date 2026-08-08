@@ -1,15 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { authApi } from './api'
+import { authApi, catalogApi } from './api'
 
-const products = [
-  { id: 12, name: 'Mitti Serving Bowl', craft: 'Blue pottery · Jaipur', price: 79, stock: 8, tone: 'blue', image: 'https://images.unsplash.com/photo-1610701596007-11502861dcfa?auto=format&fit=crop&w=800&q=85' },
-  { id: 18, name: 'Kora Table Runner', craft: 'Handloom cotton · Kerala', price: 54, stock: 12, tone: 'sand', image: 'https://images.unsplash.com/photo-1604014237800-1c9102c219da?auto=format&fit=crop&w=800&q=85' },
-  { id: 25, name: 'Aaranya Cane Lamp', craft: 'Handwoven cane · Assam', price: 128, stock: 4, tone: 'amber', image: 'https://images.unsplash.com/photo-1540932239986-30128078f3c5?auto=format&fit=crop&w=800&q=85' },
-  { id: 31, name: 'Terra Chai Set', craft: 'Studio pottery · Auroville', price: 92, stock: 6, tone: 'clay', image: 'https://images.unsplash.com/photo-1611566041950-dca3c0a1d50c?auto=format&fit=crop&w=800&q=85' },
-  { id: 42, name: 'Neel Blockprint Throw', craft: 'Bagru print · Rajasthan', price: 116, stock: 7, tone: 'indigo', image: 'https://images.unsplash.com/photo-1583845112203-29329902332e?auto=format&fit=crop&w=800&q=85' },
-  { id: 49, name: 'Kansa Ritual Tray', craft: 'Bell metal · Odisha', price: 68, stock: 9, tone: 'gold', image: 'https://images.unsplash.com/photo-1603899122634-f086ca5f5ddd?auto=format&fit=crop&w=800&q=85' },
-]
+const FALLBACK_IMAGE = '/product-placeholder.svg'
 
 const Icon = ({ name, size = 20 }) => {
   const paths = {
@@ -36,10 +29,45 @@ function App() {
     catch { return null }
   })
   const isLoggedIn = Boolean(user)
-  const [cart, setCart] = useState([{ ...products[0], quantity: 1 }, { ...products[1], quantity: 1 }])
+  const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogError, setCatalogError] = useState('')
+  const [cart, setCart] = useState([])
   const [checkoutMode, setCheckoutMode] = useState('guest')
   const [confirmed, setConfirmed] = useState(false)
   const [toast, setToast] = useState('')
+
+  useEffect(() => {
+    let active = true
+    const loadCatalog = async () => {
+      try {
+        const [productRecords, categoryRecords] = await Promise.all([
+          catalogApi.products(),
+          catalogApi.categories(),
+        ])
+        if (!active) return
+        const activeCategories = categoryRecords.filter((category) => category.is_active !== false)
+        const categoryNames = new Map(activeCategories.map((category) => [String(category.id), category.name]))
+        setCategories(activeCategories)
+        setProducts(productRecords
+          .filter((product) => product.is_active !== false)
+          .map((product) => ({
+            ...product,
+            price: Number(product.price),
+            stock: Number(product.stock_quantity),
+            image: product.image_url || FALLBACK_IMAGE,
+            craft: categoryNames.get(String(product.category_id)) || 'Uncategorised',
+          })))
+      } catch (error) {
+        if (active) setCatalogError(error.message || 'Unable to load the collection')
+      } finally {
+        if (active) setCatalogLoading(false)
+      }
+    }
+    loadCatalog()
+    return () => { active = false }
+  }, [])
 
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart])
   const count = cart.reduce((sum, item) => sum + item.quantity, 0)
@@ -93,7 +121,7 @@ function App() {
         </div>
       </header>
 
-      {view === 'shop' && <Shop products={products} addToCart={addToCart} />}
+      {view === 'shop' && <Shop products={products} categories={categories} loading={catalogLoading} error={catalogError} addToCart={addToCart} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} isLoggedIn={isLoggedIn} onLogin={() => setLoginOpen(true)} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
       {view === 'track' && <TrackOrder />}
       {view === 'orders' && <Orders />}
@@ -112,7 +140,12 @@ function App() {
   )
 }
 
-function Shop({ products, addToCart }) {
+function Shop({ products, categories, loading, error, addToCart }) {
+  const [categoryId, setCategoryId] = useState('all')
+  const visibleProducts = categoryId === 'all'
+    ? products
+    : products.filter((product) => String(product.category_id) === categoryId)
+
   return <main>
     <section className="hero-section">
       <div className="hero-copy"><span className="eyebrow">Handmade for the everyday</span><h1>Live with things<br/><em>that have a soul.</em></h1><p>Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.</p><button className="primary">Explore the collection <Icon name="arrow" size={18}/></button></div>
@@ -121,10 +154,13 @@ function Shop({ products, addToCart }) {
     <section className="story-strip"><p><span>01</span> Small-batch</p><p><span>02</span> Artisan-made</p><p><span>03</span> Responsibly sourced</p><p><span>04</span> Made to last</p></section>
     <section className="collection">
       <div className="section-head"><div><span className="eyebrow">Curated for you</span><h2>Objects of quiet beauty</h2></div><button>View all pieces <Icon name="arrow" size={17}/></button></div>
-      <div className="filters"><button className="selected">All objects</button><button>Table & kitchen</button><button>Textiles</button><button>Lighting</button><button>Decor</button></div>
-      <div className="product-grid">{products.map((p, i) => <article className="product-card" key={p.id}>
-        <div className={`product-image ${p.tone}`}><img src={p.image} alt={p.name}/>{i < 2 && <span className="new-tag">New</span>}<button className="wish" aria-label={`Save ${p.name}`}><Icon name="heart" size={18}/></button><button className="quick-add" onClick={() => addToCart(p)}>Quick add <Icon name="plus" size={16}/></button></div>
-        <div className="product-meta"><div><h3>{p.name}</h3><p>{p.craft}</p></div><strong>S${p.price}</strong></div>
+      <div className="filters" aria-label="Product categories"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => setCategoryId('all')}>All objects</button>{categories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => setCategoryId(String(category.id))} key={category.id}>{category.name}</button>)}</div>
+      {loading && <div className="catalog-status" role="status">Loading the collection…</div>}
+      {error && <div className="catalog-status error" role="alert">{error}</div>}
+      {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">No pieces are available in this category yet.</div>}
+      <div className="product-grid">{visibleProducts.map((p) => <article className="product-card" key={p.id}>
+        <div className="product-image"><img src={p.image} alt={p.name} onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/><button className="wish" aria-label={`Save ${p.name}`}><Icon name="heart" size={18}/></button><button className="quick-add" disabled={p.stock < 1} onClick={() => addToCart(p)}>{p.stock < 1 ? 'Out of stock' : 'Quick add'} <Icon name="plus" size={16}/></button></div>
+        <div className="product-meta"><div><h3>{p.name}</h3><p>{p.craft}</p></div><strong>S${p.price.toFixed(2)}</strong></div>
       </article>)}</div>
     </section>
     <section className="craft-callout"><div className="craft-image"></div><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link">Meet our makers <Icon name="arrow" size={18}/></button></div></section>
@@ -166,6 +202,6 @@ function Login({ close, success }) {
 
 function TrackOrder() { const [found, setFound] = useState(false); return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Enter your order number and the email or phone used at checkout.</p><form onSubmit={(e) => { e.preventDefault(); setFound(true) }}><label>Order number<input required placeholder="SNS-20260801-0001" defaultValue="SNS-20260801-0001"/></label><label>Email or phone<input required placeholder="you@example.com" defaultValue="guest@example.com"/></label><button className="primary full">Track order <Icon name="arrow" size={18}/></button></form>{found && <div className="tracking-result"><div><span>Order status</span><strong>Preparing your pieces</strong></div><div className="progress"><i></i></div><div className="steps"><b>Confirmed</b><b>Preparing</b><span>Dispatched</span><span>Delivered</span></div><p>Estimated dispatch in 1–2 working days.</p></div>}</div></main> }
 
-function Orders() { return <main className="orders-page"><span className="eyebrow">Your collection</span><h1>My orders</h1><p>Keep track of the beautiful things you’ve chosen.</p><article className="order-card"><div className="order-card-head"><div><span>Order SNS-20260718-0042</span><small>Placed 18 July 2026</small></div><b>Delivered</b></div><div className="order-card-body"><div className="order-thumbs"><img src={products[2].image} alt=""/><img src={products[4].image} alt=""/></div><div><span>2 items</span><strong>S$244.00</strong></div><button className="secondary">View details <Icon name="chevron" size={16}/></button></div></article></main> }
+function Orders() { return <main className="orders-page"><span className="eyebrow">Your collection</span><h1>My orders</h1><p>Keep track of the beautiful things you’ve chosen.</p><div className="catalog-status">Your order history will appear here.</div></main> }
 
 export default App
