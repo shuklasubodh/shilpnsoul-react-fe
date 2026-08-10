@@ -137,7 +137,7 @@ function App() {
         </div>
       </header>
 
-      {view === 'shop' && <Shop products={products} categories={categories} loading={catalogLoading} error={catalogError} addToCart={addToCart} />}
+      {view === 'shop' && <Shop products={products} categories={categories} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} isLoggedIn={isLoggedIn} onLogin={() => setLoginOpen(true)} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
       {view === 'track' && <TrackOrder />}
       {view === 'orders' && <Orders />}
@@ -156,7 +156,7 @@ function App() {
   )
 }
 
-function Shop({ products, categories, loading, error, addToCart }) {
+function Shop({ products, categories, loading, error, cart, addToCart }) {
   const [categoryId, setCategoryId] = useState('all')
   const visibleProducts = categoryId === 'all'
     ? products
@@ -174,13 +174,75 @@ function Shop({ products, categories, loading, error, addToCart }) {
       {loading && <div className="catalog-status" role="status">Loading the collection…</div>}
       {error && <div className="catalog-status error" role="alert">{error}</div>}
       {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">No pieces are available in this category yet.</div>}
-      <div className="product-grid">{visibleProducts.map((p) => <article className="product-card" key={p.id}>
-        <div className="product-image"><img src={p.image} alt={p.name} onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/><button className="wish" aria-label={`Save ${p.name}`}><Icon name="heart" size={18}/></button><button className="quick-add" disabled={p.stock < 1} onClick={() => addToCart(p)}>{p.stock < 1 ? 'Out of stock' : 'Quick add'} <Icon name="plus" size={16}/></button></div>
-        <div className="product-meta"><div><h3>{p.name}</h3><p>{p.craft}</p></div><strong>S${p.price.toFixed(2)}</strong></div>
-      </article>)}</div>
+      <div className="product-grid">{visibleProducts.map((product) => <ProductCard product={product} cartQuantity={cart.find((item) => item.id === product.id)?.quantity || 0} addToCart={addToCart} key={product.id} />)}</div>
     </section>
     <section className="craft-callout"><div className="craft-image"></div><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link">Meet our makers <Icon name="arrow" size={18}/></button></div></section>
   </main>
+}
+
+function ProductCard({ product, cartQuantity, addToCart }) {
+  const images = product.images.length ? product.images : [FALLBACK_IMAGE]
+  const [imageIndex, setImageIndex] = useState(0)
+  const [previewing, setPreviewing] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [expandedIndex, setExpandedIndex] = useState(0)
+
+  useEffect(() => {
+    if (!previewing || images.length < 2) return undefined
+    const timer = window.setInterval(() => {
+      setImageIndex((current) => (current + 1) % images.length)
+    }, 900)
+    return () => window.clearInterval(timer)
+  }, [previewing, images.length])
+
+  useEffect(() => {
+    if (!expanded) return undefined
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setExpanded(false)
+      if (event.key === 'ArrowRight') setExpandedIndex((current) => (current + 1) % images.length)
+      if (event.key === 'ArrowLeft') setExpandedIndex((current) => (current - 1 + images.length) % images.length)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [expanded, images.length])
+
+  const stopPreview = () => {
+    setPreviewing(false)
+    setImageIndex(0)
+  }
+
+  const openGallery = () => {
+    setExpandedIndex(imageIndex)
+    setExpanded(true)
+  }
+
+  return <article className="product-card" onMouseEnter={() => setPreviewing(true)} onMouseLeave={stopPreview} onFocus={() => setPreviewing(true)} onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) stopPreview()
+  }}>
+    <div className="product-image">
+      <button className="zoom-trigger" onClick={openGallery} aria-label={`Enlarge images for ${product.name}`}>
+        <img src={images[imageIndex]} alt={`${product.name}${images.length > 1 ? `, view ${imageIndex + 1} of ${images.length}` : ''}`} onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} />
+      </button>
+      {images.length > 1 && <span className="image-count" aria-hidden="true">{imageIndex + 1}/{images.length}</span>}
+      <button className="wish" aria-label={`Save ${product.name}`}><Icon name="heart" size={18}/></button>
+      <button className="quick-add" disabled={product.stock < 1} onClick={() => addToCart(product)}>{product.stock < 1 ? 'Out of stock' : 'Quick add'} <Icon name="plus" size={16}/></button>
+    </div>
+    <div className="product-meta"><div><h3>{product.name}</h3><p>{product.craft}</p><p className={`stock-availability ${product.stock < 1 ? 'out-of-stock' : ''}`}><span>{product.stock < 1 ? 'Out of stock' : `${product.stock} available`}</span>{cartQuantity > 0 && <b>{cartQuantity} in bag</b>}</p></div><strong>S${product.price.toFixed(2)}</strong></div>
+    {expanded && <div className="image-lightbox" role="dialog" aria-modal="true" aria-label={`${product.name} image gallery`} onClick={() => setExpanded(false)}>
+      <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
+        <button className="lightbox-close icon-button" onClick={() => setExpanded(false)} aria-label="Close image gallery"><Icon name="close" /></button>
+        <button className="lightbox-main" onClick={() => setExpandedIndex((expandedIndex + 1) % images.length)} aria-label={images.length > 1 ? 'Show next image' : product.name}>
+          <img src={images[expandedIndex]} alt={`${product.name}, enlarged view ${expandedIndex + 1} of ${images.length}`} onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} />
+        </button>
+        {images.length > 1 && <>
+          <button className="gallery-arrow previous" onClick={() => setExpandedIndex((expandedIndex - 1 + images.length) % images.length)} aria-label="Previous image"><Icon name="chevron" /></button>
+          <button className="gallery-arrow next" onClick={() => setExpandedIndex((expandedIndex + 1) % images.length)} aria-label="Next image"><Icon name="chevron" /></button>
+        </>}
+        <div className="gallery-thumbnails" aria-label="Choose product image">{images.map((url, index) => <button className={expandedIndex === index ? 'selected' : ''} onClick={() => setExpandedIndex(index)} aria-label={`View image ${index + 1}`} key={`${url}-${index}`}><img src={url} alt="" /></button>)}</div>
+        <span className="lightbox-count">{expandedIndex + 1} / {images.length}</span>
+      </div>
+    </div>}
+  </article>
 }
 
 function CartDrawer({ cart, total, updateQuantity, close, checkout }) {
