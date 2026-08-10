@@ -27,15 +27,14 @@ export const authApi = {
   }),
 }
 
-const listQuery = (sortField) => new URLSearchParams({
-  sort: JSON.stringify([sortField, 'ASC']),
-  range: JSON.stringify([0, 99]),
-  filter: JSON.stringify({ is_active: true }),
+const listQuery = () => new URLSearchParams({
+  _start: '0',
+  _end: '100',
 }).toString()
 
 export const catalogApi = {
-  products: () => request(`/products?${listQuery('id')}`),
-  categories: () => request(`/categories?${listQuery('display_order')}`),
+  products: () => request(`/products?${listQuery()}`),
+  categories: () => request(`/categories?${listQuery()}`),
 }
 
 export const cartApi = {
