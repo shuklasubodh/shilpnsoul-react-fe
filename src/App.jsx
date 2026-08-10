@@ -4,6 +4,18 @@ import { authApi, catalogApi } from './api'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
 
+const productImages = (product) => {
+  if (Array.isArray(product.images)) return product.images.filter((url) => /^https?:\/\//i.test(String(url)))
+  if (!product.image_url) return []
+  try {
+    const parsed = JSON.parse(product.image_url)
+    if (Array.isArray(parsed)) return parsed.filter((url) => /^https?:\/\//i.test(String(url)))
+  } catch {
+    // Legacy records store one URL directly rather than a JSON array.
+  }
+  return /^https?:\/\//i.test(String(product.image_url)) ? [product.image_url] : []
+}
+
 const Icon = ({ name, size = 20 }) => {
   const paths = {
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
@@ -52,13 +64,17 @@ function App() {
         setCategories(activeCategories)
         setProducts(productRecords
           .filter((product) => product.is_active !== false)
-          .map((product) => ({
-            ...product,
-            price: Number(product.price),
-            stock: Number(product.stock_quantity),
-            image: product.image_url || FALLBACK_IMAGE,
-            craft: categoryNames.get(String(product.category_id)) || 'Uncategorised',
-          })))
+          .map((product) => {
+            const images = productImages(product)
+            return {
+              ...product,
+              images,
+              price: Number(product.price),
+              stock: Number(product.stock_quantity),
+              image: images[0] || FALLBACK_IMAGE,
+              craft: categoryNames.get(String(product.category_id)) || 'Uncategorised',
+            }
+          }))
       } catch (error) {
         if (active) setCatalogError(error.message || 'Unable to load the collection')
       } finally {
