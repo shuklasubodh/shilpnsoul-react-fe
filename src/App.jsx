@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { authApi, catalogApi, paymentApi } from './api'
+import { authApi, catalogApi, orderApi, paymentApi } from './api'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
 const userCartKey = (userId) => `shoppingCart:user:${userId}`
@@ -288,14 +288,19 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     setRedirecting(true)
     const data = new FormData(event.currentTarget)
     try {
-      const result = await paymentApi.createStripeCheckout({
-        customer: { name: data.get('name'), email: data.get('email'), phone: data.get('phone'), shippingAddress: data.get('shippingAddress') },
-        items: cart.map(({ id, quantity }) => ({ productId: id, quantity })),
-        successUrl: `${window.location.origin}${window.location.pathname}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${window.location.origin}${window.location.pathname}?payment=cancelled`,
+      if (!isLoggedIn) throw new Error('Please sign in to pay securely with Stripe.')
+      const order = await orderApi.checkout({
+        shipping_name: data.get('name'),
+        shipping_phone: data.get('phone'),
+        shipping_address: data.get('shippingAddress'),
+        contact_email: data.get('email'),
+        contact_phone: data.get('phone'),
+        payment_method: 'STRIPE',
+        items: cart.map(({ id, quantity }) => ({ product_id: id, quantity })),
       })
-      if (!result.url) throw new Error('The payment service did not return a checkout URL.')
-      window.location.assign(result.url)
+      const result = await paymentApi.createStripeCheckout(order.id)
+      if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
+      window.location.assign(result.checkout_url)
     } catch (error) {
       setPaymentError(error.message || 'Stripe checkout could not be started. Please try again.')
       setRedirecting(false)
@@ -315,7 +320,7 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
     <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
       <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address<input required name="email" type="email" defaultValue={isLoggedIn && mode === 'customer' ? user?.email || '' : ''} placeholder="you@example.com"/></label><label>Phone number<input required name="phone" type="tel" defaultValue={isLoggedIn && mode === 'customer' ? user?.phone || '' : ''} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
-        <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">Choose how to pay</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className={paymentMethod === 'stripe' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')}/><span><b>Credit or debit card</b><small>Secure payment powered by Stripe</small></span><strong>Stripe</strong></label><label className={paymentMethod === 'paynow' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'paynow'} onChange={() => setPaymentMethod('paynow')}/><span><b>PayNow QR</b><small>Scan using your banking app</small></span></label></div>{paymentMethod === 'paynow' && <><p className="payment-intro">Open the payment window to scan the merchant QR code.</p><button className="secondary payment-open" type="button" onClick={() => setPaymentOpen(true)}>{paymentConfirmed ? 'View PayNow QR again' : 'Open PayNow payment'} <Icon name="arrow" size={17}/></button>{paymentConfirmed && <p className="payment-status"><Icon name="check" size={15}/> Payment marked as completed</p>}</>}</section>
+        <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">Choose how to pay</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className={paymentMethod === 'stripe' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')}/><span><b>Credit or debit card</b><small>{isLoggedIn ? 'Secure payment powered by Stripe' : 'Sign in required for Stripe payment'}</small></span><strong>Stripe</strong></label><label className={paymentMethod === 'paynow' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'paynow'} onChange={() => setPaymentMethod('paynow')}/><span><b>PayNow QR</b><small>Scan using your banking app</small></span></label></div>{paymentMethod === 'paynow' && <><p className="payment-intro">Open the payment window to scan the merchant QR code.</p><button className="secondary payment-open" type="button" onClick={() => setPaymentOpen(true)}>{paymentConfirmed ? 'View PayNow QR again' : 'Open PayNow payment'} <Icon name="arrow" size={17}/></button>{paymentConfirmed && <p className="payment-status"><Icon name="check" size={15}/> Payment marked as completed</p>}</>}</section>
         <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label>{paymentError && <p className="payment-error" role="alert">{paymentError}</p>}<button className="primary full" disabled={!cart.length || redirecting || (paymentMethod === 'paynow' && !paymentConfirmed)}>{redirecting ? 'Opening secure checkout…' : paymentMethod === 'stripe' ? `Pay S$${orderTotal.toFixed(2)} with Stripe` : `Confirm payment & place order · S$${orderTotal.toFixed(2)}`} {!redirecting && <Icon name="arrow" size={18}/>}</button><p className="secure">{paymentMethod === 'stripe' ? 'You’ll continue to Stripe’s secure checkout. Card details never touch our servers.' : 'PayNow payment is confirmed manually.'}</p></form>
       {paymentOpen && <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="paynow-modal-title" onClick={() => setPaymentOpen(false)}><div className="payment-modal-panel" onClick={(event) => event.stopPropagation()}><button className="icon-button payment-modal-close" type="button" onClick={() => setPaymentOpen(false)} aria-label="Close PayNow payment"><Icon name="close" /></button><span className="eyebrow">Secure payment</span><h2 id="paynow-modal-title">Pay with PayNow</h2><div className="paynow-layout"><img src="/paynow-qr.jpeg" alt="PayNow QR code for Shilp and Soul payment"/><div><h3>Scan to pay S${orderTotal.toFixed(2)}</h3><ol><li>Open your banking app and select Scan & Pay.</li><li>Verify the merchant name displayed by your bank.</li><li>Enter exactly <strong>S${orderTotal.toFixed(2)}</strong> and complete payment.</li></ol><p>Never proceed if your bank shows an unexpected recipient.</p></div></div><label className="checkbox payment-confirmation"><input checked={paymentConfirmed} type="checkbox" onChange={(event) => setPaymentConfirmed(event.target.checked)}/> I have paid S${orderTotal.toFixed(2)} using PayNow</label><button className="primary full" type="button" disabled={!paymentConfirmed} onClick={() => setPaymentOpen(false)}>Done <Icon name="check" size={17}/></button></div></div>}
     </section><OrderSummary cart={cart} total={total}/></div>

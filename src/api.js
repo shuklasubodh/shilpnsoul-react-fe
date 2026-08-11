@@ -54,7 +54,5 @@ export const orderApi = {
 }
 
 export const paymentApi = {
-  createStripeCheckout: (checkout) => request('/payments/stripe/checkout-session', {
-    method: 'POST', body: JSON.stringify(checkout),
-  }),
+  createStripeCheckout: (orderId) => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST' }),
 }
