@@ -52,3 +52,9 @@ export const orderApi = {
   get: (orderNumber) => request(`/orders/${encodeURIComponent(orderNumber)}`),
   track: (orderNumber, contact) => request('/orders/track', { method: 'POST', body: JSON.stringify({ orderNumber, ...contact }) }),
 }
+
+export const paymentApi = {
+  createStripeCheckout: (checkout) => request('/payments/stripe/checkout-session', {
+    method: 'POST', body: JSON.stringify(checkout),
+  }),
+}
