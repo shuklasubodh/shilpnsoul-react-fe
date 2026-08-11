@@ -4,6 +4,9 @@ import { authApi, catalogApi, orderApi, paymentApi } from './api'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
 const userCartKey = (userId) => `shoppingCart:user:${userId}`
+const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
+const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
+const initialView = () => ['/payment/cancel', '/payment/success'].includes(paymentReturn()) ? 'checkout' : 'shop'
 
 const savedUserCart = (userId) => {
   if (!userId) return []
@@ -44,7 +47,7 @@ const Icon = ({ name, size = 20 }) => {
 }
 
 function App() {
-  const [view, setView] = useState('shop')
+  const [view, setView] = useState(initialView)
   const [cartOpen, setCartOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [user, setUser] = useState(() => {
@@ -58,8 +61,26 @@ function App() {
   const [catalogError, setCatalogError] = useState('')
   const [cart, setCart] = useState(() => savedUserCart(user?.id))
   const [checkoutMode, setCheckoutMode] = useState(() => user ? 'customer' : 'guest')
-  const [confirmed, setConfirmed] = useState(false)
-  const [toast, setToast] = useState('')
+  const [confirmed, setConfirmed] = useState(() => paymentReturn() === '/payment/success')
+  const [toast, setToast] = useState(() => paymentReturn() === '/payment/cancel' ? 'Payment cancelled. Your bag has been kept.' : '')
+
+  useEffect(() => {
+    const routePaymentReturn = () => {
+      const path = paymentReturn()
+      if (path === '/payment/cancel') {
+        setConfirmed(false)
+        setView('checkout')
+        setToast('Payment cancelled. Your bag has been kept.')
+      } else if (path === '/payment/success') {
+        setConfirmed(true)
+        setView('checkout')
+        setCart([])
+        if (user?.id) localStorage.removeItem(pendingStripeOrderKey(user.id))
+      }
+    }
+    window.addEventListener('popstate', routePaymentReturn)
+    return () => window.removeEventListener('popstate', routePaymentReturn)
+  }, [user])
 
   useEffect(() => {
     let active = true
@@ -115,7 +136,12 @@ function App() {
     .map((item) => item.id === id ? { ...item, quantity: Math.max(0, Math.min(item.stock, item.quantity + delta)) } : item)
     .filter((item) => item.quantity > 0))
 
-  const go = (next) => { setView(next); setCartOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const go = (next) => {
+    setView(next)
+    setCartOpen(false)
+    if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
   const login = (session) => {
     localStorage.setItem('authToken', session.token)
     localStorage.setItem('authUser', JSON.stringify(session.user))
@@ -289,16 +315,17 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     const data = new FormData(event.currentTarget)
     try {
       if (!isLoggedIn) throw new Error('Please sign in to pay securely with Stripe.')
-      const order = await orderApi.checkout({
-        shipping_name: data.get('name'),
-        shipping_phone: data.get('phone'),
-        shipping_address: data.get('shippingAddress'),
-        contact_email: data.get('email'),
-        contact_phone: data.get('phone'),
-        payment_method: 'STRIPE',
-        items: cart.map(({ id, quantity }) => ({ product_id: id, quantity })),
-      })
-      const result = await paymentApi.createStripeCheckout(order.id)
+      let orderId = localStorage.getItem(pendingStripeOrderKey(user.id))
+      if (!orderId) {
+        const order = await orderApi.checkout({
+          shipping_name: data.get('name'), shipping_phone: data.get('phone'), shipping_address: data.get('shippingAddress'),
+          contact_email: data.get('email'), contact_phone: data.get('phone'), payment_method: 'STRIPE',
+          items: cart.map(({ id, quantity }) => ({ product_id: id, quantity })),
+        })
+        orderId = order.id
+        localStorage.setItem(pendingStripeOrderKey(user.id), String(orderId))
+      }
+      const result = await paymentApi.createStripeCheckout(orderId)
       if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
       window.location.assign(result.checkout_url)
     } catch (error) {
