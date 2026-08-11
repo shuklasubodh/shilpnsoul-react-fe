@@ -3,6 +3,17 @@ import './App.css'
 import { authApi, catalogApi } from './api'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
+const userCartKey = (userId) => `shoppingCart:user:${userId}`
+
+const savedUserCart = (userId) => {
+  if (!userId) return []
+  try {
+    const saved = JSON.parse(localStorage.getItem(userCartKey(userId)))
+    return Array.isArray(saved) ? saved : []
+  } catch {
+    return []
+  }
+}
 
 const productImages = (product) => {
   if (Array.isArray(product.images)) return product.images.filter((url) => /^https?:\/\//i.test(String(url)))
@@ -45,8 +56,8 @@ function App() {
   const [categories, setCategories] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
-  const [cart, setCart] = useState([])
-  const [checkoutMode, setCheckoutMode] = useState('guest')
+  const [cart, setCart] = useState(() => savedUserCart(user?.id))
+  const [checkoutMode, setCheckoutMode] = useState(() => user ? 'customer' : 'guest')
   const [confirmed, setConfirmed] = useState(false)
   const [toast, setToast] = useState('')
 
@@ -85,6 +96,10 @@ function App() {
     return () => { active = false }
   }, [])
 
+  useEffect(() => {
+    if (user?.id) localStorage.setItem(userCartKey(user.id), JSON.stringify(cart))
+  }, [cart, user])
+
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart])
   const count = cart.reduce((sum, item) => sum + item.quantity, 0)
 
@@ -104,15 +119,19 @@ function App() {
   const login = (session) => {
     localStorage.setItem('authToken', session.token)
     localStorage.setItem('authUser', JSON.stringify(session.user))
+    setCart(savedUserCart(session.user.id))
     setUser(session.user)
     setCheckoutMode('customer')
     setLoginOpen(false)
     setToast(`Welcome back, ${session.user.first_name}`)
   }
   const logout = () => {
+    if (user?.id) localStorage.setItem(userCartKey(user.id), JSON.stringify(cart))
     localStorage.removeItem('authToken')
     localStorage.removeItem('authUser')
     setUser(null)
+    setCart([])
+    setConfirmed(false)
     setCheckoutMode('guest')
     if (view === 'orders') go('shop')
     setToast('You have been signed out')
@@ -138,7 +157,7 @@ function App() {
       </header>
 
       {view === 'shop' && <Shop products={products} categories={categories} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} />}
-      {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} isLoggedIn={isLoggedIn} onLogin={() => setLoginOpen(true)} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
+      {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
       {view === 'track' && <TrackOrder />}
       {view === 'orders' && <Orders />}
 
@@ -252,11 +271,29 @@ function CartDrawer({ cart, total, updateQuantity, close, checkout }) {
   </aside>
 }
 
-function Checkout({ cart, total, mode, setMode, isLoggedIn, onLogin, onConfirm, confirmed, go }) {
+function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, confirmed, go }) {
+  const delivery = total >= 150 ? 0 : 8
+  const orderTotal = total + delivery
+  const customerName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email || 'Customer'
+  const [paymentOpen, setPaymentOpen] = useState(false)
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false)
+
+  useEffect(() => {
+    if (!paymentOpen) return undefined
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setPaymentOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [paymentOpen])
+
   if (confirmed) return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">Order confirmed</span><h1>Thank you for choosing<br/><em>handmade.</em></h1><p>Your order has been received. We’ll send the details and delivery updates to your email.</p><div className="order-number"><span>Order number</span><strong>SNS-20260801-0001</strong><button>Copy</button></div><div className="confirmation-actions"><button className="primary" onClick={() => go('shop')}>Continue shopping</button><button className="secondary" onClick={() => go('track')}>Track this order</button></div></main>
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
-    <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} onClick={() => setMode('guest')}><span>Guest checkout</span><small>Quick, no account needed</small></button><button className={mode === 'customer' ? 'active' : ''} onClick={() => isLoggedIn ? setMode('customer') : onLogin()}><span>{isLoggedIn ? 'Asha Sharma' : 'Customer sign in'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Access saved details & orders'}</small></button></div>
-      <form onSubmit={(e) => { e.preventDefault(); onConfirm() }}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required defaultValue={isLoggedIn && mode === 'customer' ? 'Asha Sharma' : ''} placeholder="Your full name"/></label><label>Email address<input required type="email" defaultValue={isLoggedIn && mode === 'customer' ? 'asha@example.com' : ''} placeholder="you@example.com"/></label><label>Phone number<input required type="tel" defaultValue={isLoggedIn && mode === 'customer' ? '+65 8123 4567' : ''} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required defaultValue={isLoggedIn && mode === 'customer' ? '91 West Coast Vale, Singapore 126755' : ''} placeholder="Street, unit number, postal code"/></label></div><label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label><button className="primary full" disabled={!cart.length}>Place order · S${total.toFixed(2)} <Icon name="arrow" size={18}/></button><p className="secure">By placing your order, you agree to our terms. No payment is collected online.</p></form>
+    <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
+      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={(e) => { e.preventDefault(); onConfirm() }}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address<input required type="email" defaultValue={isLoggedIn && mode === 'customer' ? user?.email || '' : ''} placeholder="you@example.com"/></label><label>Phone number<input required type="tel" defaultValue={isLoggedIn && mode === 'customer' ? user?.phone || '' : ''} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required placeholder="Street, unit number, postal code"/></label></div>
+        <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">PayNow QR</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><p className="payment-intro">Open the secure payment window to scan the merchant QR code.</p><button className="secondary payment-open" type="button" onClick={() => setPaymentOpen(true)}>{paymentConfirmed ? 'View PayNow QR again' : 'Open PayNow payment'} <Icon name="arrow" size={17}/></button>{paymentConfirmed && <p className="payment-status"><Icon name="check" size={15}/> Payment marked as completed</p>}</section>
+        <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label><button className="primary full" disabled={!cart.length || !paymentConfirmed}>Confirm payment & place order · S${orderTotal.toFixed(2)} <Icon name="arrow" size={18}/></button><p className="secure">By placing your order, you agree to our terms. PayNow payment is confirmed manually.</p></form>
+      {paymentOpen && <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="paynow-modal-title" onClick={() => setPaymentOpen(false)}><div className="payment-modal-panel" onClick={(event) => event.stopPropagation()}><button className="icon-button payment-modal-close" type="button" onClick={() => setPaymentOpen(false)} aria-label="Close PayNow payment"><Icon name="close" /></button><span className="eyebrow">Secure payment</span><h2 id="paynow-modal-title">Pay with PayNow</h2><div className="paynow-layout"><img src="/paynow-qr.jpeg" alt="PayNow QR code for Shilp and Soul payment"/><div><h3>Scan to pay S${orderTotal.toFixed(2)}</h3><ol><li>Open your banking app and select Scan & Pay.</li><li>Verify the merchant name displayed by your bank.</li><li>Enter exactly <strong>S${orderTotal.toFixed(2)}</strong> and complete payment.</li></ol><p>Never proceed if your bank shows an unexpected recipient.</p></div></div><label className="checkbox payment-confirmation"><input checked={paymentConfirmed} type="checkbox" onChange={(event) => setPaymentConfirmed(event.target.checked)}/> I have paid S${orderTotal.toFixed(2)} using PayNow</label><button className="primary full" type="button" disabled={!paymentConfirmed} onClick={() => setPaymentOpen(false)}>Done <Icon name="check" size={17}/></button></div></div>}
     </section><OrderSummary cart={cart} total={total}/></div>
   </main>
 }
