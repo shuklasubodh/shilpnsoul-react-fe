@@ -67,6 +67,8 @@ function App() {
   const [checkoutMode, setCheckoutMode] = useState(() => user || !LIVE_MODE ? 'customer' : 'guest')
   const [confirmed, setConfirmed] = useState(() => paymentReturn() === '/payment/success')
   const [toast, setToast] = useState(() => paymentReturn() === '/payment/cancel' ? 'Payment cancelled. Your bag has been kept.' : '')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     const routePaymentReturn = () => {
@@ -154,6 +156,19 @@ function App() {
     if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
+  const showProducts = () => {
+    setView('shop')
+    setCartOpen(false)
+    if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })
+    }))
+  }
+  const openSearch = () => {
+    setView('shop')
+    setSearchOpen(true)
+    window.requestAnimationFrame(() => document.querySelector('.site-search input')?.focus())
+  }
   const login = (session) => {
     localStorage.setItem('authToken', session.token)
     localStorage.setItem('authUser', JSON.stringify(session.user))
@@ -183,19 +198,20 @@ function App() {
         <button className="brand" onClick={() => go('shop')}><span>shilp</span><i>&</i><span>soul</span></button>
         <nav aria-label="Main navigation">
           <button className={view === 'shop' ? 'active' : ''} onClick={() => go('shop')}>Shop</button>
-          <button onClick={() => go('shop')}>New arrivals</button>
+          <button onClick={showProducts}>New arrivals</button>
           <button onClick={() => go('track')}>Track order</button>
           {isLoggedIn && <button onClick={() => go('orders')}>My orders</button>}
         </nav>
         <div className="header-actions">
-          <button className="icon-button search-button" aria-label="Search"><Icon name="search" /></button>
+          <button className="icon-button search-button" aria-label="Search products" aria-expanded={searchOpen} onClick={() => searchOpen ? setSearchOpen(false) : openSearch()}><Icon name="search" /></button>
           <button className="account-button" onClick={() => isLoggedIn ? go('orders') : setLoginOpen(true)}><Icon name="user"/><span>{isLoggedIn ? `Hi, ${user.first_name}` : 'Sign in'}</span></button>
           {isLoggedIn && <button className="logout-button" onClick={logout}>Log out</button>}
           <button className="icon-button bag-button" onClick={() => setCartOpen(true)} aria-label={`Shopping bag with ${count} items`}><Icon name="bag"/><b>{count}</b></button>
         </div>
       </header>
+      {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
-      {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} />}
+      {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} searchQuery={searchQuery} showProducts={showProducts} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
       {view === 'track' && <TrackOrder key={user?.id || 'guest'} user={user} isLoggedIn={isLoggedIn} />}
       {view === 'orders' && <Orders products={products} />}
@@ -214,7 +230,7 @@ function App() {
   )
 }
 
-function Shop({ products, categories, banners, loading, error, cart, addToCart }) {
+function Shop({ products, categories, banners, loading, error, cart, addToCart, searchQuery, showProducts }) {
   const [categoryId, setCategoryId] = useState('all')
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(false)
@@ -246,22 +262,26 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart }
     return () => window.clearInterval(timer)
   }, [heroPaused, heroSlides.length])
   const heroSlide = heroSlides[heroIndex] || null
-  const visibleProducts = categoryId === 'all'
+  const categoryFilteredProducts = categoryId === 'all'
     ? products
     : products.filter((product) => String(product.category_id) === categoryId)
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const visibleProducts = normalizedSearch
+    ? products.filter((product) => `${product.name} ${product.craft}`.toLowerCase().includes(normalizedSearch))
+    : categoryFilteredProducts
 
   return <main>
     <section className="hero-section">
-      <div className="hero-copy"><span className="eyebrow">Handmade for the everyday</span><h1>Live with things<br/><em>that have a soul.</em></h1><p>Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.</p><button className="primary">Explore the collection <Icon name="arrow" size={18}/></button></div>
+      <div className="hero-copy"><span className="eyebrow">Handmade for the everyday</span><h1>Live with things<br/><em>that have a soul.</em></h1><p>Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.</p><button className="primary" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div>
       <div className="hero-art"><div className="hero-image" role="img" aria-label={heroSlide?.alt || 'Handcrafted home decor'} style={heroSlide ? { backgroundImage: `url("${heroSlide.image}")` } : undefined}></div><div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div><div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div><div className="maker-note"><span>{heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{heroSlide?.label || (heroSource === 'banner' ? 'No active banners' : 'Objects made with care')}</strong><button aria-label={heroSlide ? `View ${heroSlide.label}` : 'Explore the collection'} onClick={() => heroSlide?.link ? window.location.assign(heroSlide.link) : document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
     </section>
     <section className="story-strip"><p><span>01</span> Small-batch</p><p><span>02</span> Artisan-made</p><p><span>03</span> Responsibly sourced</p><p><span>04</span> Made to last</p></section>
-    <section className="collection">
+    <section className="collection" id="products">
       <div className="section-head"><div><span className="eyebrow">Curated for you</span><h2>Objects of quiet beauty</h2></div><button>View all pieces <Icon name="arrow" size={17}/></button></div>
       <div className="filters" aria-label="Product categories"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => setCategoryId('all')}>All objects</button>{categories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => setCategoryId(String(category.id))} key={category.id}>{category.name}</button>)}</div>
       {loading && <div className="catalog-status" role="status">Loading the collection…</div>}
       {error && <div className="catalog-status error" role="alert">{error}</div>}
-      {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">No pieces are available in this category yet.</div>}
+      {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">{normalizedSearch ? `No products match “${searchQuery.trim()}”.` : 'No pieces are available in this category yet.'}</div>}
       <div className="product-grid">{visibleProducts.map((product) => <ProductCard product={product} cartQuantity={cart.find((item) => item.id === product.id)?.quantity || 0} addToCart={addToCart} key={product.id} />)}</div>
     </section>
     <section className="craft-callout"><div className="craft-image"></div><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link">Meet our makers <Icon name="arrow" size={18}/></button></div></section>
