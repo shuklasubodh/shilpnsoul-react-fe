@@ -60,6 +60,7 @@ function App() {
   const isLoggedIn = Boolean(user)
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
+  const [banners, setBanners] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [cart, setCart] = useState(() => savedUserCart(user?.id))
@@ -93,14 +94,18 @@ function App() {
     let active = true
     const loadCatalog = async () => {
       try {
-        const [productRecords, categoryRecords] = await Promise.all([
+        const [productRecords, categoryRecords, bannerRecords] = await Promise.all([
           catalogApi.products(),
           catalogApi.categories(),
+          catalogApi.banners().catch(() => []),
         ])
         if (!active) return
         const activeCategories = categoryRecords.filter((category) => category.is_active !== false)
         const categoryNames = new Map(activeCategories.map((category) => [String(category.id), category.name]))
         setCategories(activeCategories)
+        setBanners(bannerRecords
+          .filter((banner) => banner.is_active !== false && /^https?:\/\//i.test(String(banner.blob_url)))
+          .sort((first, second) => Number(first.sort_order) - Number(second.sort_order) || Number(first.id) - Number(second.id)))
         setProducts(productRecords
           .filter((product) => product.is_active !== false)
           .map((product) => {
@@ -190,7 +195,7 @@ function App() {
         </div>
       </header>
 
-      {view === 'shop' && <Shop products={products} categories={categories} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} />}
+      {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
       {view === 'track' && <TrackOrder key={user?.id || 'guest'} user={user} isLoggedIn={isLoggedIn} />}
       {view === 'orders' && <Orders products={products} />}
@@ -209,18 +214,38 @@ function App() {
   )
 }
 
-function Shop({ products, categories, loading, error, cart, addToCart }) {
+function Shop({ products, categories, banners, loading, error, cart, addToCart }) {
   const [categoryId, setCategoryId] = useState('all')
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(false)
+  const [heroSource, updateHeroSource] = useState(() => localStorage.getItem('heroImageSource') === 'banner' ? 'banner' : 'product')
+  const productSlides = useMemo(() => products.flatMap((product) => product.images.map((image, index) => ({
+    id: `product-${product.id}-${index}`,
+    image,
+    label: product.name,
+    alt: `${product.name}${product.images.length > 1 ? `, image ${index + 1}` : ''}`,
+  }))), [products])
+  const bannerSlides = useMemo(() => banners.map((banner) => ({
+    id: `banner-${banner.id}`,
+    image: banner.blob_url,
+    label: banner.title || banner.alt_text || 'Featured collection',
+    alt: banner.alt_text || banner.title || 'Featured collection',
+    link: banner.link_url,
+  })), [banners])
+  const heroSlides = heroSource === 'banner' ? bannerSlides : productSlides
+  const setHeroSource = (source) => {
+    setHeroIndex(0)
+    updateHeroSource(source)
+    localStorage.setItem('heroImageSource', source)
+  }
   useEffect(() => {
-    if (heroPaused || products.length < 2) return undefined
+    if (heroPaused || heroSlides.length < 2) return undefined
     const timer = window.setInterval(() => {
-      setHeroIndex((current) => (current + 1 + Math.floor(Math.random() * (products.length - 1))) % products.length)
+      setHeroIndex((current) => (current + 1) % heroSlides.length)
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [heroPaused, products.length])
-  const heroProduct = products[heroIndex] || null
+  }, [heroPaused, heroSlides.length])
+  const heroSlide = heroSlides[heroIndex] || null
   const visibleProducts = categoryId === 'all'
     ? products
     : products.filter((product) => String(product.category_id) === categoryId)
@@ -228,7 +253,7 @@ function Shop({ products, categories, loading, error, cart, addToCart }) {
   return <main>
     <section className="hero-section">
       <div className="hero-copy"><span className="eyebrow">Handmade for the everyday</span><h1>Live with things<br/><em>that have a soul.</em></h1><p>Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.</p><button className="primary">Explore the collection <Icon name="arrow" size={18}/></button></div>
-      <div className="hero-art"><div className="hero-image" role="img" aria-label={heroProduct ? heroProduct.name : 'Handcrafted home decor'} style={heroProduct ? { backgroundImage: `url("${heroProduct.image}")` } : undefined}></div><div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic product images' : 'Pause automatic product images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={products.length < 2} onClick={() => setHeroIndex((current) => (current + 1 + Math.floor(Math.random() * (products.length - 1))) % products.length)} aria-label="Show next product image"><span>Next</span><Icon name="chevron" size={16}/></button></div><div className="maker-note"><span>From the collection</span><strong>{heroProduct ? heroProduct.name : 'Objects made with care'}</strong><button aria-label={heroProduct ? `View ${heroProduct.name}` : 'Explore the collection'} onClick={() => document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
+      <div className="hero-art"><div className="hero-image" role="img" aria-label={heroSlide?.alt || 'Handcrafted home decor'} style={heroSlide ? { backgroundImage: `url("${heroSlide.image}")` } : undefined}></div><div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div><div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div><div className="maker-note"><span>{heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{heroSlide?.label || (heroSource === 'banner' ? 'No active banners' : 'Objects made with care')}</strong><button aria-label={heroSlide ? `View ${heroSlide.label}` : 'Explore the collection'} onClick={() => heroSlide?.link ? window.location.assign(heroSlide.link) : document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
     </section>
     <section className="story-strip"><p><span>01</span> Small-batch</p><p><span>02</span> Artisan-made</p><p><span>03</span> Responsibly sourced</p><p><span>04</span> Made to last</p></section>
     <section className="collection">

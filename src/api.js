@@ -35,6 +35,7 @@ const listQuery = () => new URLSearchParams({
 export const catalogApi = {
   products: () => request(`/products?${listQuery()}`),
   categories: () => request(`/categories?${listQuery()}`),
+  banners: () => request(`/banners?${listQuery()}`),
 }
 
 export const cartApi = {
