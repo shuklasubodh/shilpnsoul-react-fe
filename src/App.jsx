@@ -209,6 +209,15 @@ function App() {
 
 function Shop({ products, categories, loading, error, cart, addToCart }) {
   const [categoryId, setCategoryId] = useState('all')
+  const [heroIndex, setHeroIndex] = useState(0)
+  useEffect(() => {
+    if (products.length < 2) return undefined
+    const timer = window.setInterval(() => {
+      setHeroIndex((current) => (current + 1 + Math.floor(Math.random() * (products.length - 1))) % products.length)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [products.length])
+  const heroProduct = products[heroIndex] || null
   const visibleProducts = categoryId === 'all'
     ? products
     : products.filter((product) => String(product.category_id) === categoryId)
@@ -216,7 +225,7 @@ function Shop({ products, categories, loading, error, cart, addToCart }) {
   return <main>
     <section className="hero-section">
       <div className="hero-copy"><span className="eyebrow">Handmade for the everyday</span><h1>Live with things<br/><em>that have a soul.</em></h1><p>Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.</p><button className="primary">Explore the collection <Icon name="arrow" size={18}/></button></div>
-      <div className="hero-art"><div className="hero-image"></div><div className="maker-note"><span>Meet the maker</span><strong>Meera & her blue pottery studio</strong><button aria-label="Read story"><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
+      <div className="hero-art"><div className="hero-image" role="img" aria-label={heroProduct ? heroProduct.name : 'Handcrafted home decor'} style={heroProduct ? { backgroundImage: `url("${heroProduct.image}")` } : undefined}></div><div className="maker-note"><span>From the collection</span><strong>{heroProduct ? heroProduct.name : 'Objects made with care'}</strong><button aria-label={heroProduct ? `View ${heroProduct.name}` : 'Explore the collection'} onClick={() => document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
     </section>
     <section className="story-strip"><p><span>01</span> Small-batch</p><p><span>02</span> Artisan-made</p><p><span>03</span> Responsibly sourced</p><p><span>04</span> Made to last</p></section>
     <section className="collection">
