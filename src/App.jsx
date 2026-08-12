@@ -189,7 +189,7 @@ function App() {
 
       {view === 'shop' && <Shop products={products} categories={categories} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
-      {view === 'track' && <TrackOrder />}
+      {view === 'track' && <TrackOrder user={user} isLoggedIn={isLoggedIn} />}
       {view === 'orders' && <Orders products={products} />}
 
       <footer>
@@ -376,7 +376,36 @@ function Login({ close, success }) {
   return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>Sign in to revisit your orders and saved details.</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>Welcome back</h2><p>Enter your details to continue.</p><form onSubmit={submit}><label>Email address<input required name="email" type="email" autoComplete="email" placeholder="you@example.com"/></label><label><span>Password <button type="button">Forgot password?</button></span><input required name="password" type="password" autoComplete="current-password" placeholder="••••••••"/></label>{error && <p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'} {!submitting && <Icon name="arrow" size={18}/>}</button></form>{LIVE_MODE ? <><div className="or"><span>or</span></div><p className="signup">New to Shilp & Soul? <button>Create an account</button></p><button className="guest-link" onClick={close}>Continue shopping as guest</button></> : <p className="development-notice">New accounts and guest checkout will be available when the store goes live.</p>}</div></section>
 }
 
-function TrackOrder() { const [found, setFound] = useState(false); return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Enter your order number and the email or phone used at checkout.</p><form onSubmit={(e) => { e.preventDefault(); setFound(true) }}><label>Order number<input required placeholder="SNS-20260801-0001" defaultValue="SNS-20260801-0001"/></label><label>Email or phone<input required placeholder="you@example.com" defaultValue="guest@example.com"/></label><button className="primary full">Track order <Icon name="arrow" size={18}/></button></form>{found && <div className="tracking-result"><div><span>Order status</span><strong>Preparing your pieces</strong></div><div className="progress"><i></i></div><div className="steps"><b>Confirmed</b><b>Preparing</b><span>Dispatched</span><span>Delivered</span></div><p>Estimated dispatch in 1–2 working days.</p></div>}</div></main> }
+function TrackOrder({ user, isLoggedIn }) {
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const submit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setResult(null)
+    setLoading(true)
+    const data = new FormData(event.currentTarget)
+    try {
+      if (isLoggedIn) {
+        const orders = await orderApi.list()
+        const match = orders.find((order) => String(order.order_number).toLowerCase() === String(data.get('orderNumber')).trim().toLowerCase())
+        if (!match) throw new Error('No order with that number was found in your account.')
+        setResult(await orderApi.get(match.id))
+      } else {
+        const contact = String(data.get('contact')).trim()
+        setResult(await orderApi.track(data.get('orderNumber'), contact.includes('@') ? { email: contact } : { phone: contact }))
+      }
+    } catch (trackError) {
+      setError(trackError.message || 'Unable to track this order.')
+    } finally {
+      setLoading(false)
+    }
+  }
+  const status = String(result?.status || '').toUpperCase()
+  const progress = { PENDING: 15, CONFIRMED: 30, PROCESSING: 50, SHIPPED: 75, DELIVERED: 100 }[status] || 0
+  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">{isLoggedIn ? 'Your order tracking' : 'Guest order tracking'}</span><h1>Where is my order?</h1><p>{isLoggedIn ? `Enter the order number associated with ${user.email}.` : 'Enter your order number and the email or phone used at checkout.'}</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…"/></label>{!isLoggedIn && <label>Email or phone<input required name="contact" placeholder="you@example.com or phone number"/></label>}<button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p></div>}</div></main>
+}
 
 function Orders({ products }) {
   const [orders, setOrders] = useState([])
