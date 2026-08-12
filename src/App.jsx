@@ -190,7 +190,7 @@ function App() {
       {view === 'shop' && <Shop products={products} categories={categories} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
       {view === 'track' && <TrackOrder />}
-      {view === 'orders' && <Orders />}
+      {view === 'orders' && <Orders products={products} />}
 
       <footer>
         <div className="footer-brand"><div className="brand light"><span>shilp</span><i>&</i><span>soul</span></div><p>Objects with a story. Made slowly,<br/>chosen thoughtfully.</p></div>
@@ -378,6 +378,41 @@ function Login({ close, success }) {
 
 function TrackOrder() { const [found, setFound] = useState(false); return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Enter your order number and the email or phone used at checkout.</p><form onSubmit={(e) => { e.preventDefault(); setFound(true) }}><label>Order number<input required placeholder="SNS-20260801-0001" defaultValue="SNS-20260801-0001"/></label><label>Email or phone<input required placeholder="you@example.com" defaultValue="guest@example.com"/></label><button className="primary full">Track order <Icon name="arrow" size={18}/></button></form>{found && <div className="tracking-result"><div><span>Order status</span><strong>Preparing your pieces</strong></div><div className="progress"><i></i></div><div className="steps"><b>Confirmed</b><b>Preparing</b><span>Dispatched</span><span>Delivered</span></div><p>Estimated dispatch in 1–2 working days.</p></div>}</div></main> }
 
-function Orders() { return <main className="orders-page"><span className="eyebrow">Your collection</span><h1>My orders</h1><p>Keep track of the beautiful things you’ve chosen.</p><div className="catalog-status">Your order history will appear here.</div></main> }
+function Orders({ products }) {
+  const [orders, setOrders] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    const loadOrders = async () => {
+      try {
+        const summaries = await orderApi.list()
+        const detailed = await Promise.all(summaries.map(async (order) => {
+          try { return await orderApi.get(order.id) }
+          catch { return order }
+        }))
+        if (active) setOrders(detailed)
+      } catch (loadError) {
+        if (active) setError(loadError.message || 'Unable to load your orders.')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    loadOrders()
+    return () => { active = false }
+  }, [])
+
+  const productImage = (productId) => products.find((product) => String(product.id) === String(productId))?.image || FALLBACK_IMAGE
+  return <main className="orders-page"><span className="eyebrow">Your collection</span><h1>My orders</h1><p>Keep track of the beautiful things you’ve chosen.</p>
+    {loading && <div className="catalog-status" role="status">Loading your orders…</div>}
+    {error && <div className="catalog-status error" role="alert">{error}</div>}
+    {!loading && !error && orders.length === 0 && <div className="catalog-status">You haven’t placed an order yet.</div>}
+    {!loading && !error && orders.map((order) => <article className="order-card" key={order.id}>
+      <div className="order-card-head"><div><span>Order</span><strong>{order.order_number}</strong></div><div><span>Placed</span><strong>{new Date(order.created_at).toLocaleDateString('en-SG')}</strong></div><div><span>Payment</span><strong className={`order-payment ${String(order.payment_status).toLowerCase()}`}>{order.payment_status}</strong></div><div><span>Status</span><strong>{order.status}</strong></div></div>
+      <div className="order-card-body"><div className="order-thumbs">{(order.items || []).map((item) => <div className="order-thumb" key={item.id}><img src={productImage(item.product_id)} alt=""/><span>{item.product_name}<small>Qty {item.quantity}</small></span></div>)}</div><strong>S${Number(order.total_amount).toFixed(2)}</strong></div>
+    </article>)}
+  </main>
+}
 
 export default App
