@@ -189,7 +189,7 @@ function App() {
 
       {view === 'shop' && <Shop products={products} categories={categories} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
-      {view === 'track' && <TrackOrder user={user} isLoggedIn={isLoggedIn} />}
+      {view === 'track' && <TrackOrder key={user?.id || 'guest'} user={user} isLoggedIn={isLoggedIn} />}
       {view === 'orders' && <Orders products={products} />}
 
       <footer>
