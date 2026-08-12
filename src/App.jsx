@@ -164,7 +164,8 @@ function App() {
     setCart([])
     setConfirmed(false)
     setCheckoutMode('guest')
-    if (view === 'orders') go('shop')
+    go('shop')
+    setLoginOpen(true)
     setToast('You have been signed out')
   }
 
