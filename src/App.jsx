@@ -76,9 +76,13 @@ function App() {
         setConfirmed(true)
         setView('checkout')
         setCart([])
-        if (user?.id) localStorage.removeItem(pendingStripeOrderKey(user.id))
+        if (user?.id) {
+          localStorage.removeItem(userCartKey(user.id))
+          localStorage.removeItem(pendingStripeOrderKey(user.id))
+        }
       }
     }
+    routePaymentReturn()
     window.addEventListener('popstate', routePaymentReturn)
     return () => window.removeEventListener('popstate', routePaymentReturn)
   }, [user])
