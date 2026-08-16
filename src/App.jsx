@@ -8,6 +8,10 @@ const userCartKey = (userId) => `shoppingCart:user:${userId}`
 const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
 const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
 const initialView = () => ['/payment/cancel', '/payment/success'].includes(paymentReturn()) ? 'checkout' : 'shop'
+const hasConstrainedConnection = () => {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+  return Boolean(connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || ''))
+}
 
 const savedUserCart = (userId) => {
   if (!userId) return []
@@ -233,7 +237,7 @@ function App() {
 function Shop({ products, categories, banners, loading, error, cart, addToCart, searchQuery, showProducts }) {
   const [categoryId, setCategoryId] = useState('all')
   const [heroIndex, setHeroIndex] = useState(0)
-  const [heroPaused, setHeroPaused] = useState(false)
+  const [heroPaused, setHeroPaused] = useState(hasConstrainedConnection)
   const [heroSource, updateHeroSource] = useState(() => localStorage.getItem('heroImageSource') === 'banner' ? 'banner' : 'product')
   const productSlides = useMemo(() => products.flatMap((product) => product.images.map((image, index) => ({
     id: `product-${product.id}-${index}`,
@@ -258,7 +262,7 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
     if (heroPaused || heroSlides.length < 2) return undefined
     const timer = window.setInterval(() => {
       setHeroIndex((current) => (current + 1) % heroSlides.length)
-    }, 1000)
+    }, 6000)
     return () => window.clearInterval(timer)
   }, [heroPaused, heroSlides.length])
   const heroSlide = heroSlides[heroIndex] || null
@@ -329,7 +333,7 @@ function ProductCard({ product, cartQuantity, addToCart }) {
   }}>
     <div className="product-image">
       <button className="zoom-trigger" onClick={openGallery} aria-label={`Enlarge images for ${product.name}`}>
-        <img src={images[imageIndex]} alt={`${product.name}${images.length > 1 ? `, view ${imageIndex + 1} of ${images.length}` : ''}`} onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} />
+        <img src={images[imageIndex]} alt={`${product.name}${images.length > 1 ? `, view ${imageIndex + 1} of ${images.length}` : ''}`} loading="lazy" decoding="async" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} />
       </button>
       {images.length > 1 && <span className="image-count" aria-hidden="true">{imageIndex + 1}/{images.length}</span>}
       <button className="wish" aria-label={`Save ${product.name}`}><Icon name="heart" size={18}/></button>
@@ -340,13 +344,13 @@ function ProductCard({ product, cartQuantity, addToCart }) {
       <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
         <button className="lightbox-close icon-button" onClick={() => setExpanded(false)} aria-label="Close image gallery"><Icon name="close" /></button>
         <button className="lightbox-main" onClick={() => setExpandedIndex((expandedIndex + 1) % images.length)} aria-label={images.length > 1 ? 'Show next image' : product.name}>
-          <img src={images[expandedIndex]} alt={`${product.name}, enlarged view ${expandedIndex + 1} of ${images.length}`} onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} />
+          <img src={images[expandedIndex]} alt={`${product.name}, enlarged view ${expandedIndex + 1} of ${images.length}`} decoding="async" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} />
         </button>
         {images.length > 1 && <>
           <button className="gallery-arrow previous" onClick={() => setExpandedIndex((expandedIndex - 1 + images.length) % images.length)} aria-label="Previous image"><Icon name="chevron" /></button>
           <button className="gallery-arrow next" onClick={() => setExpandedIndex((expandedIndex + 1) % images.length)} aria-label="Next image"><Icon name="chevron" /></button>
         </>}
-        <div className="gallery-thumbnails" aria-label="Choose product image">{images.map((url, index) => <button className={expandedIndex === index ? 'selected' : ''} onClick={() => setExpandedIndex(index)} aria-label={`View image ${index + 1}`} key={`${url}-${index}`}><img src={url} alt="" /></button>)}</div>
+        <div className="gallery-thumbnails" aria-label="Choose product image">{images.map((url, index) => <button className={expandedIndex === index ? 'selected' : ''} onClick={() => setExpandedIndex(index)} aria-label={`View image ${index + 1}`} key={`${url}-${index}`}><img src={url} alt="" loading="lazy" decoding="async" /></button>)}</div>
         <span className="lightbox-count">{expandedIndex + 1} / {images.length}</span>
       </div>
     </div>}
