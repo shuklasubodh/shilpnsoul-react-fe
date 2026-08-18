@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { authApi, catalogApi, orderApi, paymentApi } from './api'
+import { getSessionUser, saveSession, startGuestSession } from './session'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
 const LIVE_MODE = import.meta.env.VITE_LIVE_MODE === 'true'
@@ -57,10 +58,7 @@ function App() {
   const [view, setView] = useState(initialView)
   const [cartOpen, setCartOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
-  const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('authUser')) }
-    catch { return null }
-  })
+  const [user, setUser] = useState(getSessionUser)
   const isLoggedIn = Boolean(user)
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
@@ -73,6 +71,17 @@ function App() {
   const [toast, setToast] = useState(() => paymentReturn() === '/payment/cancel' ? 'Payment cancelled. Your bag has been kept.' : '')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    const expireSession = () => {
+      setUser(null)
+      setCart([])
+      setCheckoutMode('guest')
+      setToast('Your session expired. Please sign in again.')
+    }
+    window.addEventListener('auth:expired', expireSession)
+    return () => window.removeEventListener('auth:expired', expireSession)
+  }, [])
 
   useEffect(() => {
     const routePaymentReturn = () => {
@@ -174,8 +183,7 @@ function App() {
     window.requestAnimationFrame(() => document.querySelector('.site-search input')?.focus())
   }
   const login = (session) => {
-    localStorage.setItem('authToken', session.token)
-    localStorage.setItem('authUser', JSON.stringify(session.user))
+    saveSession(session)
     setCart(savedUserCart(session.user.id))
     setUser(session.user)
     setCheckoutMode('customer')
@@ -184,8 +192,7 @@ function App() {
   }
   const logout = () => {
     if (user?.id) localStorage.setItem(userCartKey(user.id), JSON.stringify(cart))
-    localStorage.removeItem('authToken')
-    localStorage.removeItem('authUser')
+    startGuestSession()
     setUser(null)
     setCart([])
     setConfirmed(false)
@@ -228,7 +235,7 @@ function App() {
       </footer>
 
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => isLoggedIn ? go('checkout') : (setCartOpen(false), setLoginOpen(true))} /></>}
-      {loginOpen && <><div className="scrim" onClick={() => setLoginOpen(false)}/><Login close={() => setLoginOpen(false)} success={login} /></>}
+      {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><Login close={() => { startGuestSession(); setLoginOpen(false) }} success={login} /></>}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
     </div>
   )
@@ -431,7 +438,10 @@ function Login({ close, success }) {
     setError('')
     setSubmitting(true)
     const data = new FormData(event.currentTarget)
-    try { success(await authApi.login(data.get('email'), data.get('password'))) }
+    try {
+      startGuestSession()
+      success(await authApi.login(data.get('email'), data.get('password')))
+    }
     catch (loginError) { setError(loginError.message) }
     finally { setSubmitting(false) }
   }

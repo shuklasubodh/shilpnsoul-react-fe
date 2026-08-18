@@ -1,16 +1,23 @@
+import { clearSession, getSessionToken } from './session'
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
 
 async function request(path, options = {}) {
-  const token = localStorage.getItem('authToken')
+  const { auth = true, ...fetchOptions } = options
+  const token = auth ? getSessionToken() : null
   const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...fetchOptions,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
+      ...fetchOptions.headers,
     },
   })
   const payload = await response.json().catch(() => ({}))
+  if (response.status === 401 && token) {
+    clearSession()
+    window.dispatchEvent(new Event('auth:expired'))
+  }
   if (!response.ok) {
     const error = new Error(payload.message || payload.error || 'Something went wrong')
     error.status = response.status
@@ -22,9 +29,11 @@ async function request(path, options = {}) {
 
 export const authApi = {
   login: (email, password) => request('/auth/login', {
+    auth: false,
     method: 'POST',
     body: JSON.stringify({ email, password }),
   }),
+  session: () => request('/auth/session'),
 }
 
 const listQuery = () => new URLSearchParams({
@@ -33,9 +42,9 @@ const listQuery = () => new URLSearchParams({
 }).toString()
 
 export const catalogApi = {
-  products: () => request(`/products?${listQuery()}`),
-  categories: () => request(`/categories?${listQuery()}`),
-  banners: () => request(`/banners?${listQuery()}`),
+  products: () => request(`/products?${listQuery()}`, { auth: false }),
+  categories: () => request(`/categories?${listQuery()}`, { auth: false }),
+  banners: () => request(`/banners?${listQuery()}`, { auth: false }),
 }
 
 export const cartApi = {
@@ -48,10 +57,10 @@ export const cartApi = {
 
 export const orderApi = {
   checkout: (details) => request('/orders', { method: 'POST', body: JSON.stringify(details) }),
-  guestCheckout: (details, items) => request('/orders/guest', { method: 'POST', body: JSON.stringify({ ...details, items }) }),
+  guestCheckout: (details, items) => request('/orders/guest', { auth: false, method: 'POST', body: JSON.stringify({ ...details, items }) }),
   list: () => request('/orders'),
   get: (orderNumber) => request(`/orders/${encodeURIComponent(orderNumber)}`),
-  track: (orderNumber, contact) => request('/orders/track', { method: 'POST', body: JSON.stringify({ orderNumber, ...contact }) }),
+  track: (orderNumber, contact) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ orderNumber, ...contact }) }),
 }
 
 export const paymentApi = {
