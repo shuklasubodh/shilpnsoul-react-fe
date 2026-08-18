@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { authApi, catalogApi, orderApi, paymentApi } from './api'
+import { authApi, cartApi, catalogApi, orderApi, paymentApi } from './api'
 import { getSessionUser, saveSession, startGuestSession } from './session'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
 const LIVE_MODE = import.meta.env.VITE_LIVE_MODE === 'true'
-const userCartKey = (userId) => `shoppingCart:user:${userId}`
+const GUEST_CART_KEY = 'shoppingCart:guest'
 const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
 const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
 const initialView = () => ['/payment/cancel', '/payment/success'].includes(paymentReturn()) ? 'checkout' : 'shop'
@@ -14,14 +14,27 @@ const hasConstrainedConnection = () => {
   return Boolean(connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || ''))
 }
 
-const savedUserCart = (userId) => {
-  if (!userId) return []
+const savedGuestCart = () => {
   try {
-    const saved = JSON.parse(localStorage.getItem(userCartKey(userId)))
+    const saved = JSON.parse(sessionStorage.getItem(GUEST_CART_KEY))
     return Array.isArray(saved) ? saved : []
   } catch {
     return []
   }
+}
+
+const cartRecords = (payload) => Array.isArray(payload) ? payload : payload?.items || payload?.cart_items || []
+const hydrateCart = (payload, products) => cartRecords(payload).flatMap((record) => {
+  const productId = record.product_id ?? record.productId ?? record.product?.id
+  const product = products.find((candidate) => String(candidate.id) === String(productId))
+  if (!product) return []
+  return [{ ...product, quantity: Number(record.quantity) || 1, cartItemId: record.id }]
+})
+
+const removeLegacyUserCarts = () => {
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith('shoppingCart:user:') || key.startsWith('pendingStripeOrder:'))
+    .forEach((key) => localStorage.removeItem(key))
 }
 
 const productImages = (product) => {
@@ -65,12 +78,14 @@ function App() {
   const [banners, setBanners] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
-  const [cart, setCart] = useState(() => savedUserCart(user?.id))
+  const [cart, setCart] = useState(() => user ? [] : savedGuestCart())
   const [checkoutMode, setCheckoutMode] = useState(() => user || !LIVE_MODE ? 'customer' : 'guest')
   const [confirmed, setConfirmed] = useState(() => paymentReturn() === '/payment/success')
   const [toast, setToast] = useState(() => paymentReturn() === '/payment/cancel' ? 'Payment cancelled. Your bag has been kept.' : '')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => removeLegacyUserCarts(), [])
 
   useEffect(() => {
     const expireSession = () => {
@@ -95,8 +110,8 @@ function App() {
         setView('checkout')
         setCart([])
         if (user?.id) {
-          localStorage.removeItem(userCartKey(user.id))
-          localStorage.removeItem(pendingStripeOrderKey(user.id))
+          sessionStorage.removeItem(pendingStripeOrderKey(user.id))
+          cartApi.clear().catch(() => setToast('Order completed, but the bag could not be cleared.'))
         }
       }
     }
@@ -145,23 +160,61 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (user?.id) localStorage.setItem(userCartKey(user.id), JSON.stringify(cart))
+    if (!user) sessionStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart))
   }, [cart, user])
+
+  useEffect(() => {
+    if (!user?.id || products.length === 0) return undefined
+    let active = true
+    cartApi.get()
+      .then((payload) => { if (active) setCart(hydrateCart(payload, products)) })
+      .catch((error) => { if (active) setToast(error.message || 'Unable to load your bag') })
+    return () => { active = false }
+  }, [products, user])
 
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart])
   const count = cart.reduce((sum, item) => sum + item.quantity, 0)
 
-  const addToCart = (product) => {
+  const refreshUserCart = async () => setCart(hydrateCart(await cartApi.get(), products))
+
+  const addToCart = async (product) => {
+    if (user) {
+      try {
+        const existing = cart.find((item) => item.id === product.id)
+        if (existing) await cartApi.update(existing.cartItemId, Math.min(existing.quantity + 1, existing.stock))
+        else await cartApi.add(product.id, 1)
+        await refreshUserCart()
+      } catch (error) {
+        setToast(error.message || 'Unable to update your bag')
+        return
+      }
+    } else {
     setCart((current) => current.some((item) => item.id === product.id)
       ? current.map((item) => item.id === product.id ? { ...item, quantity: Math.min(item.quantity + 1, item.stock) } : item)
       : [...current, { ...product, quantity: 1 }])
+    }
     setToast(`${product.name} added to your bag`)
     window.setTimeout(() => setToast(''), 2200)
   }
 
-  const updateQuantity = (id, delta) => setCart((current) => current
-    .map((item) => item.id === id ? { ...item, quantity: Math.max(0, Math.min(item.stock, item.quantity + delta)) } : item)
-    .filter((item) => item.quantity > 0))
+  const updateQuantity = async (id, delta) => {
+    if (!user) {
+      setCart((current) => current
+        .map((item) => item.id === id ? { ...item, quantity: Math.max(0, Math.min(item.stock, item.quantity + delta)) } : item)
+        .filter((item) => item.quantity > 0))
+      return
+    }
+    const item = cart.find((candidate) => candidate.id === id)
+    if (!item) return
+    const quantity = Math.max(0, Math.min(item.stock, item.quantity + delta))
+    try {
+      if (quantity === 0) await cartApi.remove(item.cartItemId)
+      else await cartApi.update(item.cartItemId, quantity)
+      await refreshUserCart()
+    } catch (error) {
+      setToast(error.message || 'Unable to update your bag')
+    }
+  }
 
   const go = (next) => {
     setView(next)
@@ -184,14 +237,14 @@ function App() {
   }
   const login = (session) => {
     saveSession(session)
-    setCart(savedUserCart(session.user.id))
+    sessionStorage.removeItem(GUEST_CART_KEY)
+    setCart([])
     setUser(session.user)
     setCheckoutMode('customer')
     setLoginOpen(false)
     setToast(`Welcome back, ${session.user.first_name}`)
   }
   const logout = () => {
-    if (user?.id) localStorage.setItem(userCartKey(user.id), JSON.stringify(cart))
     startGuestSession()
     setUser(null)
     setCart([])
@@ -389,7 +442,7 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     const data = new FormData(event.currentTarget)
     try {
       if (!isLoggedIn) throw new Error('Please sign in to pay securely with Stripe.')
-      let orderId = localStorage.getItem(pendingStripeOrderKey(user.id))
+      let orderId = sessionStorage.getItem(pendingStripeOrderKey(user.id))
       if (!orderId) {
         const order = await orderApi.checkout({
           shipping_name: data.get('name'), shipping_phone: data.get('phone'), shipping_address: data.get('shippingAddress'),
@@ -397,7 +450,7 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
           items: cart.map(({ id, quantity }) => ({ product_id: id, quantity })),
         })
         orderId = order.id
-        localStorage.setItem(pendingStripeOrderKey(user.id), String(orderId))
+        sessionStorage.setItem(pendingStripeOrderKey(user.id), String(orderId))
       }
       const result = await paymentApi.createStripeCheckout(orderId)
       if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
