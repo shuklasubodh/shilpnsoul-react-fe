@@ -270,7 +270,7 @@ function App() {
         <nav aria-label="Main navigation">
           <button className={view === 'shop' ? 'active' : ''} onClick={() => go('shop')}>Shop</button>
           <button onClick={showProducts}>New arrivals</button>
-          <button onClick={() => go('track')}>Track order</button>
+          {!isLoggedIn && <button onClick={() => go('track')}>Track order</button>}
           {isLoggedIn && <button onClick={() => go('orders')}>My orders</button>}
         </nav>
         <div className="header-actions">
@@ -284,13 +284,14 @@ function App() {
 
       {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} searchQuery={searchQuery} showProducts={showProducts} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
-      {view === 'track' && <TrackOrder key={user?.id || 'guest'} user={user} isLoggedIn={isLoggedIn} />}
+      {view === 'track' && !isLoggedIn && <TrackOrder />}
+      {view === 'track' && isLoggedIn && <Orders products={products} />}
       {view === 'orders' && <Orders products={products} />}
 
       <footer>
         <div className="footer-brand"><div className="brand light"><span>shilp</span><i>&</i><span>soul</span></div><p>Objects with a story. Made slowly,<br/>chosen thoughtfully.</p></div>
         <div><h4>Explore</h4><a>Our story</a><a>Artisans</a><a>Journal</a></div>
-        <div><h4>Help</h4><a>Shipping & returns</a><button onClick={() => go('track')}>Track an order</button><a>Contact us</a></div>
+        <div><h4>Help</h4><a>Shipping & returns</a>{!isLoggedIn && <button onClick={() => go('track')}>Track an order</button>}<a>Contact us</a></div>
         <div className="newsletter"><h4>Notes from the studio</h4><p>New collections, craft stories, and quiet inspiration.</p><label><span className="sr-only">Email address</span><input type="email" placeholder="Your email address"/><button aria-label="Subscribe"><Icon name="arrow"/></button></label></div>
       </footer>
 
@@ -477,7 +478,7 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [paymentOpen])
 
-  if (confirmed) return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">Order confirmed</span><h1>Thank you for choosing<br/><em>handmade.</em></h1><p>Your order has been received. We’ll send the details and delivery updates to your email.</p><div className="order-number"><span>Order number</span><strong>SNS-20260801-0001</strong><button>Copy</button></div><div className="confirmation-actions"><button className="primary" onClick={() => go('shop')}>Continue shopping</button><button className="secondary" onClick={() => go('track')}>Track this order</button></div></main>
+  if (confirmed) return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">Order confirmed</span><h1>Thank you for choosing<br/><em>handmade.</em></h1><p>Your order has been received. We’ll send the details and delivery updates to your email.</p><div className="order-number"><span>Order number</span><strong>SNS-20260801-0001</strong><button>Copy</button></div><div className="confirmation-actions"><button className="primary" onClick={() => go('shop')}>Continue shopping</button><button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button></div></main>
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
     <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn || !LIVE_MODE} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{!LIVE_MODE ? 'Available when the store goes live' : isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
       <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address<input required name="email" type="email" defaultValue={isLoggedIn && mode === 'customer' ? user?.email || '' : ''} placeholder="you@example.com"/></label><label>Phone number<input required name="phone" type="tel" defaultValue={isLoggedIn && mode === 'customer' ? user?.phone || '' : ''} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
@@ -508,7 +509,7 @@ function Login({ close, success }) {
   return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>Sign in to revisit your orders and saved details.</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>Welcome back</h2><p>Enter your details to continue.</p><form onSubmit={submit}><label>Email address<input required name="email" type="email" autoComplete="email" placeholder="you@example.com"/></label><label><span>Password <button type="button">Forgot password?</button></span><input required name="password" type="password" autoComplete="current-password" placeholder="••••••••"/></label>{error && <p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'} {!submitting && <Icon name="arrow" size={18}/>}</button></form>{LIVE_MODE ? <><div className="or"><span>or</span></div><p className="signup">New to Shilp & Soul? <button>Create an account</button></p><button className="guest-link" onClick={close}>Continue shopping as guest</button></> : <p className="development-notice">New accounts and guest checkout will be available when the store goes live.</p>}</div></section>
 }
 
-function TrackOrder({ user, isLoggedIn }) {
+function TrackOrder() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -519,15 +520,7 @@ function TrackOrder({ user, isLoggedIn }) {
     setLoading(true)
     const data = new FormData(event.currentTarget)
     try {
-      if (isLoggedIn) {
-        const orders = await orderApi.list()
-        const match = orders.find((order) => String(order.order_number).toLowerCase() === String(data.get('orderNumber')).trim().toLowerCase())
-        if (!match) throw new Error('No order with that number was found in your account.')
-        setResult(await orderApi.get(match.id))
-      } else {
-        const contact = String(data.get('contact')).trim()
-        setResult(await orderApi.track(data.get('orderNumber'), contact.includes('@') ? { email: contact } : { phone: contact }))
-      }
+      setResult(await orderApi.track(String(data.get('orderNumber')).trim(), String(data.get('email')).trim().toLowerCase()))
     } catch (trackError) {
       setError(trackError.message || 'Unable to track this order.')
     } finally {
@@ -536,12 +529,15 @@ function TrackOrder({ user, isLoggedIn }) {
   }
   const status = String(result?.status || '').toUpperCase()
   const progress = { PENDING: 15, CONFIRMED: 30, PROCESSING: 50, SHIPPED: 75, DELIVERED: 100 }[status] || 0
-  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">{isLoggedIn ? 'Your order tracking' : 'Guest order tracking'}</span><h1>Where is my order?</h1><p>{isLoggedIn ? `Enter the order number associated with ${user.email}.` : 'Enter your order number and the email or phone used at checkout.'}</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…"/></label>{!isLoggedIn && <label>Email or phone<input required name="contact" placeholder="you@example.com or phone number"/></label>}<button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p></div>}</div></main>
+  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Enter the order number and the same email address used during guest checkout.</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><label>Email address<input required name="email" type="email" placeholder="you@example.com" autoComplete="email"/></label><button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p></div>}</div></main>
 }
 
 function Orders({ products }) {
   const [orders, setOrders] = useState([])
+  const [selectedOrderId, setSelectedOrderId] = useState(null)
+  const [orderSearch, setOrderSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [removing, setRemoving] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -553,7 +549,10 @@ function Orders({ products }) {
           try { return await orderApi.get(order.id) }
           catch { return order }
         }))
-        if (active) setOrders(detailed)
+        if (active) {
+          setOrders(detailed)
+          setSelectedOrderId(detailed[0]?.id ?? null)
+        }
       } catch (loadError) {
         if (active) setError(loadError.message || 'Unable to load your orders.')
       } finally {
@@ -565,14 +564,47 @@ function Orders({ products }) {
   }, [])
 
   const productImage = (productId) => products.find((product) => String(product.id) === String(productId))?.image || FALLBACK_IMAGE
+  const normalizedOrderSearch = orderSearch.trim().toLowerCase()
+  const matchingOrders = normalizedOrderSearch
+    ? orders.filter((order) => String(order.order_number).toLowerCase().includes(normalizedOrderSearch))
+    : orders
+  const selectedOrder = matchingOrders.find((order) => String(order.id) === String(selectedOrderId)) || matchingOrders[0]
+  const canRemoveSelectedOrder = selectedOrder && (selectedOrder.payment_status === 'PAID' || ['CANCELLED', 'RETURNED'].includes(selectedOrder.status))
+  const removeSelectedOrder = async () => {
+    if (!canRemoveSelectedOrder || !window.confirm(`Remove ${selectedOrder.order_number} from your order history?`)) return
+    setRemoving(true)
+    setError('')
+    try {
+      await orderApi.removeFromHistory(selectedOrder.id)
+      const remaining = orders.filter((order) => String(order.id) !== String(selectedOrder.id))
+      setOrders(remaining)
+      setSelectedOrderId(remaining[0]?.id ?? null)
+    } catch (removeError) {
+      setError(removeError.message || 'Unable to remove this order from your history.')
+    } finally { setRemoving(false) }
+  }
   return <main className="orders-page"><span className="eyebrow">Your collection</span><h1>My orders</h1><p>Keep track of the beautiful things you’ve chosen.</p>
     {loading && <div className="catalog-status" role="status">Loading your orders…</div>}
     {error && <div className="catalog-status error" role="alert">{error}</div>}
     {!loading && !error && orders.length === 0 && <div className="catalog-status">You haven’t placed an order yet.</div>}
-    {!loading && !error && orders.map((order) => <article className="order-card" key={order.id}>
-      <div className="order-card-head"><div><span>Order</span><strong>{order.order_number}</strong></div><div><span>Placed</span><strong>{new Date(order.created_at).toLocaleDateString('en-SG')}</strong></div><div><span>Payment</span><strong className={`order-payment ${String(order.payment_status).toLowerCase()}`}>{order.payment_status}</strong></div><div><span>Status</span><strong>{order.status}</strong></div></div>
-      <div className="order-card-body"><div className="order-thumbs">{(order.items || []).map((item) => <div className="order-thumb" key={item.id}><img src={productImage(item.product_id)} alt=""/><span>{item.product_name}<small>Qty {item.quantity}</small></span></div>)}</div><strong>S${Number(order.total_amount).toFixed(2)}</strong></div>
-    </article>)}
+    {!loading && !error && orders.length > 0 && <div className="orders-workspace">
+      <aside className="orders-list" aria-label="Order history">
+        <div className="orders-list-heading"><span>Order history</span><b>{matchingOrders.length}</b></div>
+        <label className="order-search"><Icon name="search" size={16}/><span className="sr-only">Search your orders</span><input type="search" value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} placeholder="Search order number" autoComplete="off"/></label>
+        {matchingOrders.length === 0 && <div className="order-search-empty"><strong>No matching order</strong><span>Check the order number and try again.</span></div>}
+        {matchingOrders.map((order) => <button type="button" className={`order-list-item ${String(order.id) === String(selectedOrder?.id) ? 'selected' : ''}`} onClick={() => setSelectedOrderId(order.id)} aria-pressed={String(order.id) === String(selectedOrder?.id)} key={order.id}>
+          <span><strong>{order.order_number}</strong><small>{new Date(order.created_at).toLocaleDateString('en-SG')}</small></span>
+          <span><b>{order.status}</b><small>S${Number(order.total_amount).toFixed(2)}</small></span>
+        </button>)}
+      </aside>
+      {selectedOrder ? <article className="order-detail" aria-live="polite">
+        <div className="order-detail-head"><div><span className="eyebrow">Order details</span><h2>{selectedOrder.order_number}</h2><p>Placed {new Date(selectedOrder.created_at).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' })}</p></div><strong className={`order-status ${String(selectedOrder.status).toLowerCase()}`}>{selectedOrder.status}</strong></div>
+        <div className="order-detail-meta"><div><span>Payment</span><strong className={`order-payment ${String(selectedOrder.payment_status).toLowerCase()}`}>{selectedOrder.payment_status}</strong></div><div><span>Items</span><strong>{(selectedOrder.items || []).reduce((sum, item) => sum + Number(item.quantity), 0)}</strong></div><div><span>Total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div></div>
+        <div className="order-detail-items">{(selectedOrder.items || []).map((item) => <div className="order-detail-item" key={item.id}><img src={productImage(item.product_id)} alt=""/><div><strong>{item.product_name}</strong><span>Quantity {item.quantity}</span></div><b>S${Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)).toFixed(2)}</b></div>)}</div>
+        <div className="order-detail-total"><span>Order total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div>
+        {canRemoveSelectedOrder && <div className="order-history-actions"><button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button></div>}
+      </article> : <div className="order-detail order-detail-empty"><Icon name="search" size={28}/><h2>No order selected</h2><p>Search by an order number from your account.</p></div>}
+    </div>}
   </main>
 }
 

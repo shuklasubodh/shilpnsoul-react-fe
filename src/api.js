@@ -68,7 +68,8 @@ export const orderApi = {
   guestCheckout: (details, items) => request('/orders/guest', { auth: false, method: 'POST', body: JSON.stringify({ ...details, items }) }),
   list: () => request('/orders'),
   get: (orderNumber) => request(`/orders/${encodeURIComponent(orderNumber)}`),
-  track: (orderNumber, contact) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ orderNumber, ...contact }) }),
+  removeFromHistory: (orderId) => request(`/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' }),
+  track: (orderNumber, email) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ orderNumber, email }) }),
 }
 
 export const paymentApi = {
