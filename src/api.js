@@ -48,11 +48,19 @@ export const catalogApi = {
 }
 
 export const cartApi = {
-  get: () => request('/cart'),
-  add: (productId, quantity = 1) => request('/cart/items', { method: 'POST', body: JSON.stringify({ productId, quantity }) }),
-  update: (itemId, quantity) => request(`/cart/items/${itemId}`, { method: 'PUT', body: JSON.stringify({ quantity }) }),
-  remove: (itemId) => request(`/cart/items/${itemId}`, { method: 'DELETE' }),
-  clear: () => request('/cart', { method: 'DELETE' }),
+  load: async () => {
+    const carts = await request('/carts')
+    const cart = carts[0] || await request('/carts', { method: 'POST', body: '{}' })
+    return request(`/carts/${encodeURIComponent(cart.id)}`)
+  },
+  get: (cartId) => request(`/carts/${encodeURIComponent(cartId)}`),
+  add: (cartId, productId, quantity = 1) => request('/cart-items', {
+    method: 'POST',
+    body: JSON.stringify({ cart_id: cartId, product_id: productId, quantity }),
+  }),
+  update: (itemId, quantity) => request(`/cart-items/${encodeURIComponent(itemId)}`, { method: 'PUT', body: JSON.stringify({ quantity }) }),
+  remove: (itemId) => request(`/cart-items/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
+  clear: async (cart) => Promise.all((cart.items || cart.cart_items || []).map((item) => request(`/cart-items/${encodeURIComponent(item.id)}`, { method: 'DELETE' }))),
 }
 
 export const orderApi = {

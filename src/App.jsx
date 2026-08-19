@@ -111,7 +111,7 @@ function App() {
         setCart([])
         if (user?.id) {
           sessionStorage.removeItem(pendingStripeOrderKey(user.id))
-          cartApi.clear().catch(() => setToast('Order completed, but the bag could not be cleared.'))
+          cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
         }
       }
     }
@@ -166,7 +166,7 @@ function App() {
   useEffect(() => {
     if (!user?.id || products.length === 0) return undefined
     let active = true
-    cartApi.get()
+    cartApi.load()
       .then((payload) => { if (active) setCart(hydrateCart(payload, products)) })
       .catch((error) => { if (active) setToast(error.message || 'Unable to load your bag') })
     return () => { active = false }
@@ -175,14 +175,21 @@ function App() {
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart])
   const count = cart.reduce((sum, item) => sum + item.quantity, 0)
 
-  const refreshUserCart = async () => setCart(hydrateCart(await cartApi.get(), products))
+  const refreshUserCart = async (cartId) => setCart(hydrateCart(cartId ? await cartApi.get(cartId) : await cartApi.load(), products))
 
   const addToCart = async (product) => {
     if (user) {
       try {
         const existing = cart.find((item) => item.id === product.id)
         if (existing) await cartApi.update(existing.cartItemId, Math.min(existing.quantity + 1, existing.stock))
-        else await cartApi.add(product.id, 1)
+        else {
+          const activeCart = await cartApi.load()
+          await cartApi.add(activeCart.id, product.id, 1)
+          await refreshUserCart(activeCart.id)
+          setToast(`${product.name} added to your bag`)
+          window.setTimeout(() => setToast(''), 2200)
+          return
+        }
         await refreshUserCart()
       } catch (error) {
         setToast(error.message || 'Unable to update your bag')
