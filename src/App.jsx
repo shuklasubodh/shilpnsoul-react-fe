@@ -223,6 +223,23 @@ function App() {
     }
   }
 
+  const removeFromCart = async (id) => {
+    const item = cart.find((candidate) => candidate.id === id)
+    if (!item) return
+    if (!user) {
+      setCart((current) => current.filter((candidate) => candidate.id !== id))
+      setToast(`${item.name} removed from your bag`)
+      return
+    }
+    try {
+      await cartApi.remove(item.cartItemId)
+      await refreshUserCart()
+      setToast(`${item.name} removed from your bag`)
+    } catch (error) {
+      setToast(error.message || 'Unable to remove this item')
+    }
+  }
+
   const go = (next) => {
     setView(next)
     setCartOpen(false)
@@ -282,7 +299,7 @@ function App() {
       </header>
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
-      {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} searchQuery={searchQuery} showProducts={showProducts} />}
+      {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
@@ -296,13 +313,13 @@ function App() {
       </footer>
 
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => isLoggedIn ? go('checkout') : (setCartOpen(false), setLoginOpen(true))} /></>}
-      {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><Login close={() => { startGuestSession(); setLoginOpen(false) }} success={login} /></>}
+      {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><Login close={() => { startGuestSession(); setLoginOpen(false) }} success={login} continueAsGuest={() => { startGuestSession(); setLoginOpen(false); setCheckoutMode('guest'); if (cart.length) go('checkout') }} /></>}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
     </div>
   )
 }
 
-function Shop({ products, categories, banners, loading, error, cart, addToCart, searchQuery, showProducts }) {
+function Shop({ products, categories, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts }) {
   const [categoryId, setCategoryId] = useState('all')
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(hasConstrainedConnection)
@@ -354,13 +371,13 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
       {loading && <div className="catalog-status" role="status">Loading the collection…</div>}
       {error && <div className="catalog-status error" role="alert">{error}</div>}
       {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">{normalizedSearch ? `No products match “${searchQuery.trim()}”.` : 'No pieces are available in this category yet.'}</div>}
-      <div className="product-grid">{visibleProducts.map((product) => <ProductCard product={product} cartQuantity={cart.find((item) => item.id === product.id)?.quantity || 0} addToCart={addToCart} key={product.id} />)}</div>
+      <div className="product-grid">{visibleProducts.map((product) => <ProductCard product={product} cartQuantity={cart.find((item) => item.id === product.id)?.quantity || 0} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} key={product.id} />)}</div>
     </section>
     <section className="craft-callout"><div className="craft-image"></div><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link">Meet our makers <Icon name="arrow" size={18}/></button></div></section>
   </main>
 }
 
-function ProductCard({ product, cartQuantity, addToCart }) {
+function ProductCard({ product, cartQuantity, addToCart, updateQuantity, removeFromCart }) {
   const images = product.images.length ? product.images : [FALLBACK_IMAGE]
   const [imageIndex, setImageIndex] = useState(0)
   const [previewing, setPreviewing] = useState(false)
@@ -405,7 +422,11 @@ function ProductCard({ product, cartQuantity, addToCart }) {
       </button>
       {images.length > 1 && <span className="image-count" aria-hidden="true">{imageIndex + 1}/{images.length}</span>}
       <button className="wish" aria-label={`Save ${product.name}`}><Icon name="heart" size={18}/></button>
-      <button className="quick-add" disabled={product.stock < 1} onClick={() => addToCart(product)}>{product.stock < 1 ? 'Out of stock' : 'Quick add'} <Icon name="plus" size={16}/></button>
+      <div className={`product-image-actions ${cartQuantity > 0 ? 'has-remove' : ''}`}>
+        <button className="quick-add" disabled={product.stock < 1} onClick={() => addToCart(product)}>{product.stock < 1 ? 'Out of stock' : 'Quick add'} <Icon name="plus" size={16}/></button>
+        {cartQuantity > 0 && <button className="reduce-in-bag" onClick={() => updateQuantity(product.id, -1)} aria-label={`Reduce ${product.name} quantity by one`}>Reduce <Icon name="minus" size={14}/></button>}
+        {cartQuantity > 0 && <button className="remove-from-bag" onClick={() => removeFromCart(product.id)} aria-label={`Remove all ${product.name} from bag`}>Remove <Icon name="close" size={14}/></button>}
+      </div>
     </div>
     <div className="product-meta"><div><h3>{product.name}</h3><p>{product.craft}</p><p className={`stock-availability ${product.stock < 1 ? 'out-of-stock' : ''}`}><span>{product.stock < 1 ? 'Out of stock' : `${product.stock} available`}</span>{cartQuantity > 0 && <b>{cartQuantity} in bag</b>}</p></div><strong>S${product.price.toFixed(2)}</strong></div>
     {expanded && <div className="image-lightbox" role="dialog" aria-modal="true" aria-label={`${product.name} image gallery`} onClick={() => setExpanded(false)}>
@@ -441,26 +462,72 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   const [paymentMethod, setPaymentMethod] = useState('stripe')
   const [paymentError, setPaymentError] = useState('')
   const [redirecting, setRedirecting] = useState(false)
+  const [checkoutEmail, setCheckoutEmail] = useState(isLoggedIn && mode === 'customer' ? user?.email || '' : '')
+  const [verificationId, setVerificationId] = useState(null)
+  const [verificationToken, setVerificationToken] = useState('')
+  const [verificationCode, setVerificationCode] = useState('')
+  const [verificationBusy, setVerificationBusy] = useState(false)
+  const [verificationMessage, setVerificationMessage] = useState('')
+  const accountEmailConfirmed = Boolean(isLoggedIn && user?.email_verified_at && checkoutEmail.trim().toLowerCase() === String(user.email).toLowerCase())
+  const notificationConfirmed = accountEmailConfirmed || Boolean(verificationToken)
+
+  const changeCheckoutEmail = (event) => {
+    setCheckoutEmail(event.target.value)
+    setVerificationId(null)
+    setVerificationToken('')
+    setVerificationCode('')
+    setVerificationMessage('')
+  }
+
+  const requestCheckoutCode = async () => {
+    setVerificationBusy(true)
+    setVerificationMessage('')
+    setPaymentError('')
+    try {
+      const result = await authApi.requestVerification(checkoutEmail.trim().toLowerCase(), 'CHECKOUT')
+      if (result.verified) setVerificationMessage('Your saved email is already verified.')
+      else {
+        setVerificationId(result.verification_id)
+        setVerificationMessage('A six-digit code was sent to your email.')
+      }
+    } catch (error) { setPaymentError(error.message) }
+    finally { setVerificationBusy(false) }
+  }
+
+  const confirmCheckoutCode = async () => {
+    setVerificationBusy(true)
+    setPaymentError('')
+    try {
+      const result = await authApi.verifyCode(verificationId, verificationCode, isLoggedIn)
+      setVerificationToken(result.verification_token)
+      setVerificationMessage('Email confirmed for this order.')
+    } catch (error) { setPaymentError(error.message) }
+    finally { setVerificationBusy(false) }
+  }
 
   const submitCheckout = async (event) => {
     event.preventDefault()
-    if (paymentMethod === 'paynow') return onConfirm()
     setPaymentError('')
     setRedirecting(true)
     const data = new FormData(event.currentTarget)
     try {
-      if (!isLoggedIn) throw new Error('Please sign in to pay securely with Stripe.')
-      let orderId = sessionStorage.getItem(pendingStripeOrderKey(user.id))
-      if (!orderId) {
-        const order = await orderApi.checkout({
+      if (!notificationConfirmed) throw new Error('Confirm the email notification channel before placing your order.')
+      const pendingKey = pendingStripeOrderKey(user?.id || 'guest')
+      let pending
+      try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
+      if (!pending?.id) {
+        const details = {
           shipping_name: data.get('name'), shipping_phone: data.get('phone'), shipping_address: data.get('shippingAddress'),
-          contact_email: data.get('email'), contact_phone: data.get('phone'), payment_method: 'STRIPE',
-          items: cart.map(({ id, quantity }) => ({ product_id: id, quantity })),
-        })
-        orderId = order.id
-        sessionStorage.setItem(pendingStripeOrderKey(user.id), String(orderId))
+          contact_email: checkoutEmail.trim().toLowerCase(), contact_phone: data.get('phone'), payment_method: paymentMethod === 'stripe' ? 'STRIPE' : 'CASH',
+          notification_channel: 'EMAIL', notification_destination: checkoutEmail.trim().toLowerCase(), notification_verification_token: verificationToken,
+        }
+        const items = cart.map(({ id, quantity }) => ({ product_id: id, quantity }))
+        const order = isLoggedIn ? await orderApi.checkout({ ...details, items }) : await orderApi.guestCheckout(details, items)
+        pending = { id: order.id, orderNumber: order.order_number, accessToken: order.order_access_token || '' }
+        sessionStorage.setItem(pendingKey, JSON.stringify(pending))
       }
-      const result = await paymentApi.createStripeCheckout(orderId)
+      if (paymentMethod !== 'stripe') return onConfirm(pending)
+      const result = await paymentApi.createStripeCheckout(pending.id, pending.accessToken)
       if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
       window.location.assign(result.checkout_url)
     } catch (error) {
@@ -481,9 +548,10 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   if (confirmed) return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">Order confirmed</span><h1>Thank you for choosing<br/><em>handmade.</em></h1><p>Your order has been received. We’ll send the details and delivery updates to your email.</p><div className="order-number"><span>Order number</span><strong>SNS-20260801-0001</strong><button>Copy</button></div><div className="confirmation-actions"><button className="primary" onClick={() => go('shop')}>Continue shopping</button><button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button></div></main>
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
     <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn || !LIVE_MODE} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{!LIVE_MODE ? 'Available when the store goes live' : isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
-      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address<input required name="email" type="email" defaultValue={isLoggedIn && mode === 'customer' ? user?.email || '' : ''} placeholder="you@example.com"/></label><label>Phone number<input required name="phone" type="tel" defaultValue={isLoggedIn && mode === 'customer' ? user?.phone || '' : ''} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
-        <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">Choose how to pay</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className={paymentMethod === 'stripe' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')}/><span><b>Credit/debit card or PayNow</b><small>{isLoggedIn ? 'Secure payment powered by Stripe' : 'Sign in required for Stripe payment'}</small></span><strong>Stripe</strong></label><label className={paymentMethod === 'paynow' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'paynow'} onChange={() => setPaymentMethod('paynow')}/><span><b>PayLah QR code</b><small>Scan using your PayLah app</small></span></label></div>{paymentMethod === 'paynow' && <><p className="payment-intro">Open the payment window to scan the merchant QR code.</p><button className="secondary payment-open" type="button" onClick={() => setPaymentOpen(true)}>{paymentConfirmed ? 'View PayLah QR again' : 'Open PayLah payment'} <Icon name="arrow" size={17}/></button>{paymentConfirmed && <p className="payment-status"><Icon name="check" size={15}/> Payment marked as completed</p>}</>}</section>
-        <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label>{paymentError && <p className="payment-error" role="alert">{paymentError}</p>}<button className="primary full" disabled={!cart.length || redirecting || (paymentMethod === 'paynow' && !paymentConfirmed)}>{redirecting ? 'Opening secure checkout…' : paymentMethod === 'stripe' ? `Pay S$${orderTotal.toFixed(2)} with Stripe` : `Confirm payment & place order · S$${orderTotal.toFixed(2)}`} {!redirecting && <Icon name="arrow" size={18}/>}</button><p className="secure">{paymentMethod === 'stripe' ? 'You’ll continue to Stripe’s secure checkout. Card details never touch our servers.' : 'PayNow payment is confirmed manually.'}</p></form>
+      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address<input required name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>Phone number<input required name="phone" type="tel" defaultValue={isLoggedIn && mode === 'customer' ? user?.phone || '' : ''} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
+        <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className="selected"><input type="radio" checked readOnly/> Email</label><label aria-disabled="true"><input type="radio" disabled/> WhatsApp <small>Setup pending</small></label></div>{accountEmailConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your account email is verified.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy || !checkoutEmail}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && !verificationToken && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm email</button></div>}{verificationToken && <p className="verification-success"><Icon name="check" size={15}/> Email confirmed.</p>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
+        <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">Choose how to pay</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className={paymentMethod === 'stripe' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')}/><span><b>Credit/debit card or PayNow</b><small>Secure payment powered by Stripe</small></span><strong>Stripe</strong></label><label className={paymentMethod === 'paynow' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'paynow'} onChange={() => setPaymentMethod('paynow')}/><span><b>PayLah QR code</b><small>Scan using your PayLah app</small></span></label></div>{paymentMethod === 'paynow' && <><p className="payment-intro">Open the payment window to scan the merchant QR code.</p><button className="secondary payment-open" type="button" onClick={() => setPaymentOpen(true)}>{paymentConfirmed ? 'View PayLah QR again' : 'Open PayLah payment'} <Icon name="arrow" size={17}/></button>{paymentConfirmed && <p className="payment-status"><Icon name="check" size={15}/> Payment marked as completed</p>}</>}</section>
+        <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label>{paymentError && <p className="payment-error" role="alert">{paymentError}</p>}<button className="primary full" disabled={!cart.length || !notificationConfirmed || redirecting || (paymentMethod === 'paynow' && !paymentConfirmed)}>{redirecting ? 'Opening secure checkout…' : paymentMethod === 'stripe' ? `Pay S$${orderTotal.toFixed(2)} with Stripe` : `Confirm payment & place order · S$${orderTotal.toFixed(2)}`} {!redirecting && <Icon name="arrow" size={18}/>}</button><p className="secure">{paymentMethod === 'stripe' ? 'You’ll continue to Stripe’s secure checkout. Card details never touch our servers.' : 'PayNow payment is confirmed manually.'}</p></form>
       {paymentOpen && <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="paynow-modal-title" onClick={() => setPaymentOpen(false)}><div className="payment-modal-panel" onClick={(event) => event.stopPropagation()}><button className="icon-button payment-modal-close" type="button" onClick={() => setPaymentOpen(false)} aria-label="Close PayLah payment"><Icon name="close" /></button><span className="eyebrow">Manual QR payment</span><h2 id="paynow-modal-title">Pay with PayLah</h2><div className="paynow-layout"><img src="/paynow-qr.jpeg" alt="PayLah QR code for Shilp and Soul payment"/><div><h3>Scan to pay S${orderTotal.toFixed(2)}</h3><ol><li>Open your PayLah app and select Scan & Pay.</li><li>Verify the merchant name displayed in the app.</li><li>Enter exactly <strong>S${orderTotal.toFixed(2)}</strong> and complete payment.</li></ol><p>Never proceed if the app shows an unexpected recipient.</p></div></div><label className="checkbox payment-confirmation"><input checked={paymentConfirmed} type="checkbox" onChange={(event) => setPaymentConfirmed(event.target.checked)}/> I have paid S${orderTotal.toFixed(2)} using PayLah</label><button className="primary full" type="button" disabled={!paymentConfirmed} onClick={() => setPaymentOpen(false)}>Done <Icon name="check" size={17}/></button></div></div>}
     </section><OrderSummary cart={cart} total={total}/></div>
   </main>
@@ -491,9 +559,28 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
 
 function OrderSummary({ cart, total }) { return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map(item => <div className="summary-item" key={item.id}><div><img src={item.image} alt=""/><b>{item.quantity}</b></div><p><strong>{item.name}</strong><span>{item.craft}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<div className="summary-lines"><p><span>Subtotal</span><b>S${total.toFixed(2)}</b></p><p><span>Delivery</span><b>{total >= 150 ? 'Complimentary' : 'S$8.00'}</b></p></div><div className="summary-total"><span>Total <small>SGD</small></span><strong>S${(total + (total >= 150 ? 0 : 8)).toFixed(2)}</strong></div></aside> }
 
-function Login({ close, success }) {
+function Login({ close, success, continueAsGuest }) {
+  const [registering, setRegistering] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [registrationEmail, setRegistrationEmail] = useState('')
+  const [verificationId, setVerificationId] = useState(null)
+  const [verificationCode, setVerificationCode] = useState('')
+  const [verificationToken, setVerificationToken] = useState('')
+  const [verificationMessage, setVerificationMessage] = useState('')
+
+  const requestRegistrationCode = async () => {
+    setSubmitting(true);setError('');setVerificationMessage('')
+    try{const result=await authApi.requestVerification(registrationEmail.trim().toLowerCase(),'REGISTRATION');setVerificationId(result.verification_id);setVerificationMessage('A six-digit code was sent to your email.')}
+    catch(requestError){setError(requestError.message)}finally{setSubmitting(false)}
+  }
+
+  const confirmRegistrationCode = async () => {
+    setSubmitting(true);setError('')
+    try{const result=await authApi.verifyCode(verificationId,verificationCode,false);setVerificationToken(result.verification_token);setVerificationMessage('Email verified. You can now create your account.')}
+    catch(verifyError){setError(verifyError.message)}finally{setSubmitting(false)}
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     setError('')
@@ -501,18 +588,22 @@ function Login({ close, success }) {
     const data = new FormData(event.currentTarget)
     try {
       startGuestSession()
-      success(await authApi.login(data.get('email'), data.get('password')))
+      if(registering){
+        if(!verificationToken)throw new Error('Verify your email before creating the account.')
+        success(await authApi.register({first_name:data.get('firstName'),last_name:data.get('lastName'),email:registrationEmail.trim().toLowerCase(),phone:data.get('phone'),password:data.get('password'),verification_token:verificationToken}))
+      }else success(await authApi.login(data.get('email'), data.get('password')))
     }
     catch (loginError) { setError(loginError.message) }
     finally { setSubmitting(false) }
   }
-  return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>Sign in to revisit your orders and saved details.</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>Welcome back</h2><p>Enter your details to continue.</p><form onSubmit={submit}><label>Email address<input required name="email" type="email" autoComplete="email" placeholder="you@example.com"/></label><label><span>Password <button type="button">Forgot password?</button></span><input required name="password" type="password" autoComplete="current-password" placeholder="••••••••"/></label>{error && <p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'} {!submitting && <Icon name="arrow" size={18}/>}</button></form>{LIVE_MODE ? <><div className="or"><span>or</span></div><p className="signup">New to Shilp & Soul? <button>Create an account</button></p><button className="guest-link" onClick={close}>Continue shopping as guest</button></> : <p className="development-notice">New accounts and guest checkout will be available when the store goes live.</p>}</div></section>
+  return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>{registering?'Create an account with a verified email for simpler checkout.':'Sign in to revisit your orders and saved details.'}</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>{registering?'Create your account':'Welcome back'}</h2><p>{registering?'Verify your email before your account is created.':'Enter your details to continue.'}</p><form onSubmit={submit}>{registering&&<div className="registration-names"><label>First name<input required name="firstName" autoComplete="given-name"/></label><label>Last name<input required name="lastName" autoComplete="family-name"/></label></div>}<label>Email address<input required name="email" type="email" autoComplete="email" value={registering?registrationEmail:undefined} onChange={registering?(event)=>{setRegistrationEmail(event.target.value);setVerificationId(null);setVerificationToken('');setVerificationCode('')}:undefined} placeholder="you@example.com"/></label>{registering&&<><div className="registration-verification"><button className="secondary" type="button" disabled={submitting||!registrationEmail} onClick={requestRegistrationCode}>{verificationId?'Resend code':'Send verification code'}</button>{verificationId&&!verificationToken&&<><input aria-label="Six-digit verification code" inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event)=>setVerificationCode(event.target.value.replace(/\D/g,'').slice(0,6))}/><button className="secondary" type="button" disabled={submitting||verificationCode.length!==6} onClick={confirmRegistrationCode}>Verify</button></>}</div>{verificationMessage&&<p className="verification-note" role="status">{verificationMessage}</p>}<label>Phone number<input name="phone" type="tel" autoComplete="tel" placeholder="+65 0000 0000"/></label></>}<label><span>Password {!registering&&<button type="button">Forgot password?</button>}</span><input required name="password" type="password" minLength={registering?12:undefined} autoComplete={registering?'new-password':'current-password'} placeholder="••••••••••••"/></label>{error&&<p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting||(registering&&!verificationToken)}>{submitting?'Please wait…':registering?'Create account':'Sign in'} {!submitting&&<Icon name="arrow" size={18}/>}</button></form>{LIVE_MODE?<><div className="or"><span>or</span></div><p className="signup">{registering?'Already have an account?':'New to Shilp & Soul?'} <button type="button" onClick={()=>{setRegistering(!registering);setError('')}}>{registering?'Sign in':'Create an account'}</button></p><button className="guest-link" onClick={continueAsGuest}>Continue as guest</button></>:<p className="development-notice">New accounts and guest checkout will be available when the store goes live.</p>}</div></section>
 }
 
 function TrackOrder() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [notificationMessage, setNotificationMessage] = useState('')
   const submit = async (event) => {
     event.preventDefault()
     setError('')
@@ -527,9 +618,14 @@ function TrackOrder() {
       setLoading(false)
     }
   }
+  const resend = async () => {
+    setLoading(true);setError('');setNotificationMessage('')
+    try{await orderApi.resendGuestSummary(result.id,result.order_access_token);setNotificationMessage('Order summary sent to your confirmed email.')}
+    catch(resendError){setError(resendError.message||'Unable to resend the order summary.')}finally{setLoading(false)}
+  }
   const status = String(result?.status || '').toUpperCase()
   const progress = { PENDING: 15, CONFIRMED: 30, PROCESSING: 50, SHIPPED: 75, DELIVERED: 100 }[status] || 0
-  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Enter the order number and the same email address used during guest checkout.</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><label>Email address<input required name="email" type="email" placeholder="you@example.com" autoComplete="email"/></label><button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p></div>}</div></main>
+  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Enter the order number and the same email address used during guest checkout.</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><label>Email address<input required name="email" type="email" placeholder="you@example.com" autoComplete="email"/></label><button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p><button className="secondary" type="button" onClick={resend} disabled={loading}>Resend order email</button>{notificationMessage&&<p className="verification-success" role="status">{notificationMessage}</p>}</div>}</div></main>
 }
 
 function Orders({ products }) {
@@ -538,6 +634,8 @@ function Orders({ products }) {
   const [orderSearch, setOrderSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [removing, setRemoving] = useState(false)
+  const [resendingOrderId, setResendingOrderId] = useState(null)
+  const [notificationMessage, setNotificationMessage] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -583,6 +681,15 @@ function Orders({ products }) {
       setError(removeError.message || 'Unable to remove this order from your history.')
     } finally { setRemoving(false) }
   }
+  const resendSelectedOrder = async () => {
+    setResendingOrderId(selectedOrder.id)
+    setNotificationMessage('')
+    try {
+      await orderApi.resendSummary(selectedOrder.id)
+      setNotificationMessage('Order summary sent to your confirmed email.')
+    } catch (resendError) { setError(resendError.message || 'Unable to resend the order summary.') }
+    finally { setResendingOrderId(null) }
+  }
   return <main className="orders-page"><span className="eyebrow">Your collection</span><h1>My orders</h1><p>Keep track of the beautiful things you’ve chosen.</p>
     {loading && <div className="catalog-status" role="status">Loading your orders…</div>}
     {error && <div className="catalog-status error" role="alert">{error}</div>}
@@ -602,7 +709,8 @@ function Orders({ products }) {
         <div className="order-detail-meta"><div><span>Payment</span><strong className={`order-payment ${String(selectedOrder.payment_status).toLowerCase()}`}>{selectedOrder.payment_status}</strong></div><div><span>Items</span><strong>{(selectedOrder.items || []).reduce((sum, item) => sum + Number(item.quantity), 0)}</strong></div><div><span>Total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div></div>
         <div className="order-detail-items">{(selectedOrder.items || []).map((item) => <div className="order-detail-item" key={item.id}><img src={productImage(item.product_id)} alt=""/><div><strong>{item.product_name}</strong><span>Quantity {item.quantity}</span></div><b>S${Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)).toFixed(2)}</b></div>)}</div>
         <div className="order-detail-total"><span>Order total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div>
-        {canRemoveSelectedOrder && <div className="order-history-actions"><button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button></div>}
+        {notificationMessage && <p className="order-notification-message" role="status">{notificationMessage}</p>}
+        <div className="order-history-actions"><button type="button" className="secondary" onClick={resendSelectedOrder} disabled={Boolean(resendingOrderId)}>{resendingOrderId ? 'Sending...' : 'Resend order email'}</button>{canRemoveSelectedOrder && <button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button>}</div>
       </article> : <div className="order-detail order-detail-empty"><Icon name="search" size={28}/><h2>No order selected</h2><p>Search by an order number from your account.</p></div>}
     </div>}
   </main>

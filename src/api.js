@@ -33,6 +33,9 @@ export const authApi = {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   }),
+  requestVerification: (destination, purpose) => request('/notification-verifications/request', { auth: purpose !== 'REGISTRATION', method: 'POST', body: JSON.stringify({ channel: 'EMAIL', destination, purpose }) }),
+  verifyCode: (verificationId, code, auth = true) => request('/notification-verifications/verify', { auth, method: 'POST', body: JSON.stringify({ verification_id: verificationId, code }) }),
+  register: (details) => request('/auth/register', { auth: false, method: 'POST', body: JSON.stringify(details) }),
   session: () => request('/auth/session'),
 }
 
@@ -69,9 +72,11 @@ export const orderApi = {
   list: () => request('/orders'),
   get: (orderNumber) => request(`/orders/${encodeURIComponent(orderNumber)}`),
   removeFromHistory: (orderId) => request(`/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' }),
+  resendSummary: (orderId) => request(`/orders/${encodeURIComponent(orderId)}/notifications/resend`, { method: 'POST' }),
+  resendGuestSummary: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/resend`, { auth: false, method: 'POST', headers: { 'X-Order-Access-Token': accessToken } }),
   track: (orderNumber, email) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ orderNumber, email }) }),
 }
 
 export const paymentApi = {
-  createStripeCheckout: (orderId) => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST' }),
+  createStripeCheckout: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
 }
