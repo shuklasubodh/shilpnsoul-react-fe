@@ -57,9 +57,9 @@ export const cartApi = {
     return request(`/carts/${encodeURIComponent(cart.id)}`)
   },
   get: (cartId) => request(`/carts/${encodeURIComponent(cartId)}`),
-  add: (cartId, productId, quantity = 1) => request('/cart-items', {
+  add: (cartId, productId, productColorId, quantity = 1) => request('/cart-items', {
     method: 'POST',
-    body: JSON.stringify({ cart_id: cartId, product_id: productId, quantity }),
+    body: JSON.stringify({ cart_id: cartId, product_id: productId, product_color_id: productColorId, quantity }),
   }),
   update: (itemId, quantity) => request(`/cart-items/${encodeURIComponent(itemId)}`, { method: 'PUT', body: JSON.stringify({ quantity }) }),
   remove: (itemId) => request(`/cart-items/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
