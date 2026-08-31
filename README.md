@@ -1,5 +1,15 @@
 # React + Vite
 
+## Market requirement API contract
+
+The storefront assistant uses the existing `VITE_API_BASE_URL` REST API:
+
+- `POST /market-requirements` (public): accepts `product_requested`, `free_text`, `category`, optional requester fields, and `source`.
+- `GET /market-requirements` (admin bearer token): returns requirement records including `id`, `created_at`, and `status`.
+- `PUT /market-requirements/:id` (admin bearer token): accepts a new `status`.
+
+The backend should persist these records in a `market_requirements` table and enforce admin authorization on list/update. The separate admin UI is available at `/admin/market-requirements`.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

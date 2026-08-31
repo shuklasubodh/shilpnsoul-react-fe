@@ -33,7 +33,7 @@ export const authApi = {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   }),
-  requestVerification: (destination, purpose) => request('/notification-verifications/request', { auth: purpose !== 'REGISTRATION', method: 'POST', body: JSON.stringify({ channel: 'EMAIL', destination, purpose }) }),
+  requestVerification: (destination, purpose, channel = 'EMAIL') => request('/notification-verifications/request', { auth: purpose !== 'REGISTRATION', method: 'POST', body: JSON.stringify({ channel, destination, purpose }) }),
   verifyCode: (verificationId, code, auth = true) => request('/notification-verifications/verify', { auth, method: 'POST', body: JSON.stringify({ verification_id: verificationId, code }) }),
   register: (details) => request('/auth/register', { auth: false, method: 'POST', body: JSON.stringify(details) }),
   session: () => request('/auth/session'),
@@ -79,4 +79,12 @@ export const orderApi = {
 
 export const paymentApi = {
   createStripeCheckout: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
+}
+
+// Backed by the market_requirements table in the commerce API. Creation is
+// public so guests can share demand; listing/updating must be admin-protected.
+export const marketRequirementApi = {
+  create: (details) => request('/market-requirements', { auth: false, method: 'POST', body: JSON.stringify(details) }),
+  list: () => request(`/market-requirements?${listQuery()}`),
+  update: (id, details) => request(`/market-requirements/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(details) }),
 }

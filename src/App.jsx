@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { authApi, cartApi, catalogApi, orderApi, paymentApi } from './api'
+import { authApi, cartApi, catalogApi, marketRequirementApi, orderApi, paymentApi } from './api'
 import { getSessionUser, saveSession, startGuestSession } from './session'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
@@ -8,7 +8,7 @@ const LIVE_MODE = import.meta.env.VITE_LIVE_MODE === 'true'
 const GUEST_CART_KEY = 'shoppingCart:guest'
 const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
 const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
-const initialView = () => ['/payment/cancel', '/payment/success'].includes(paymentReturn()) ? 'checkout' : 'shop'
+const initialView = () => window.location.pathname === '/admin/market-requirements' ? 'requirements-admin' : ['/payment/cancel', '/payment/success'].includes(paymentReturn()) ? 'checkout' : 'shop'
 const hasConstrainedConnection = () => {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
   return Boolean(connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || ''))
@@ -66,6 +66,8 @@ const Icon = ({ name, size = 20 }) => {
     play: <path d="m8 5 11 7-11 7V5Z"/>,
     pause: <><path d="M9 5v14M15 5v14"/></>,
     menu: <><path d="M4 7h16M4 12h16M4 17h16"/></>,
+    chat: <><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/><path d="M8 9h8M8 13h5"/></>,
+    send: <><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></>,
   }
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
@@ -319,6 +321,7 @@ function App() {
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
       {view === 'orders' && <Orders products={products} />}
+      {view === 'requirements-admin' && <MarketRequirementsAdmin user={user} />}
 
       <footer>
         <div className="footer-brand"><div className="brand light"><span>shilp</span><i>&</i><span>soul</span></div><p>Objects with a story. Made slowly,<br/>chosen thoughtfully.</p></div>
@@ -330,6 +333,7 @@ function App() {
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => isLoggedIn ? go('checkout') : (setCartOpen(false), setLoginOpen(true))} /></>}
       {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><Login close={() => { startGuestSession(); setLoginOpen(false) }} success={login} continueAsGuest={() => { startGuestSession(); setLoginOpen(false); setCheckoutMode('guest'); if (cart.length) go('checkout') }} /></>}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
+      {view !== 'requirements-admin' && <ShopAssistant products={products} categories={categories} user={user} />}
     </div>
   )
 }
@@ -504,32 +508,44 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   const [paymentError, setPaymentError] = useState('')
   const [redirecting, setRedirecting] = useState(false)
   const [checkoutEmail, setCheckoutEmail] = useState(isLoggedIn && mode === 'customer' ? user?.email || '' : '')
+  const [checkoutPhone, setCheckoutPhone] = useState(isLoggedIn && mode === 'customer' ? user?.phone || '' : '')
+  const [notificationChannel, setNotificationChannel] = useState('EMAIL')
   const [verificationId, setVerificationId] = useState(null)
   const [verificationToken, setVerificationToken] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [verificationBusy, setVerificationBusy] = useState(false)
   const [verificationMessage, setVerificationMessage] = useState('')
-  const accountEmailConfirmed = Boolean(isLoggedIn && user?.email_verified_at && checkoutEmail.trim().toLowerCase() === String(user.email).toLowerCase())
-  const notificationConfirmed = accountEmailConfirmed || Boolean(verificationToken)
+  const notificationDestination = notificationChannel === 'WHATSAPP' ? checkoutPhone.trim() : checkoutEmail.trim().toLowerCase()
+  const accountNotificationConfirmed = Boolean(isLoggedIn && (notificationChannel === 'EMAIL'
+    ? user?.email_verified_at && checkoutEmail.trim().toLowerCase() === String(user.email).toLowerCase()
+    : user?.phone_verified_at && checkoutPhone.replace(/\D/g, '') === String(user?.phone || '').replace(/\D/g, '')))
+  const notificationConfirmed = accountNotificationConfirmed || Boolean(verificationToken)
 
-  const changeCheckoutEmail = (event) => {
-    setCheckoutEmail(event.target.value)
+  const resetVerification = () => {
     setVerificationId(null)
     setVerificationToken('')
     setVerificationCode('')
     setVerificationMessage('')
   }
 
+  const changeCheckoutEmail = (event) => {
+    setCheckoutEmail(event.target.value)
+    resetVerification()
+  }
+
+  const changeCheckoutPhone = (event) => { setCheckoutPhone(event.target.value); resetVerification() }
+  const chooseNotificationChannel = (channel) => { setNotificationChannel(channel); resetVerification(); setPaymentError('') }
+
   const requestCheckoutCode = async () => {
     setVerificationBusy(true)
     setVerificationMessage('')
     setPaymentError('')
     try {
-      const result = await authApi.requestVerification(checkoutEmail.trim().toLowerCase(), 'CHECKOUT')
-      if (result.verified) setVerificationMessage('Your saved email is already verified.')
+      const result = await authApi.requestVerification(notificationDestination, 'CHECKOUT', notificationChannel)
+      if (result.verified) setVerificationMessage(`Your saved ${notificationChannel === 'WHATSAPP' ? 'WhatsApp number' : 'email'} is already verified.`)
       else {
         setVerificationId(result.verification_id)
-        setVerificationMessage('A six-digit code was sent to your email.')
+        setVerificationMessage(`A six-digit code was sent by ${notificationChannel === 'WHATSAPP' ? 'WhatsApp' : 'email'}.`)
       }
     } catch (error) { setPaymentError(error.message) }
     finally { setVerificationBusy(false) }
@@ -541,7 +557,7 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     try {
       const result = await authApi.verifyCode(verificationId, verificationCode, isLoggedIn)
       setVerificationToken(result.verification_token)
-      setVerificationMessage('Email confirmed for this order.')
+      setVerificationMessage(`${notificationChannel === 'WHATSAPP' ? 'WhatsApp number' : 'Email'} confirmed for this order.`)
     } catch (error) { setPaymentError(error.message) }
     finally { setVerificationBusy(false) }
   }
@@ -552,15 +568,15 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     setRedirecting(true)
     const data = new FormData(event.currentTarget)
     try {
-      if (!notificationConfirmed) throw new Error('Confirm the email notification channel before placing your order.')
+      if (!notificationConfirmed) throw new Error('Confirm the selected notification channel before placing your order.')
       const pendingKey = pendingStripeOrderKey(user?.id || 'guest')
       let pending
       try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
       if (!pending?.id) {
         const details = {
           shipping_name: data.get('name'), shipping_phone: data.get('phone'), shipping_address: data.get('shippingAddress'),
-          contact_email: checkoutEmail.trim().toLowerCase(), contact_phone: data.get('phone'), payment_method: paymentMethod === 'stripe' ? 'STRIPE' : 'CASH',
-          notification_channel: 'EMAIL', notification_destination: checkoutEmail.trim().toLowerCase(), notification_verification_token: verificationToken,
+          contact_email: checkoutEmail.trim().toLowerCase(), contact_phone: checkoutPhone.trim(), payment_method: paymentMethod === 'stripe' ? 'STRIPE' : 'CASH',
+          notification_channel: notificationChannel, notification_destination: notificationDestination, notification_verification_token: verificationToken,
         }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
         const order = isLoggedIn ? await orderApi.checkout({ ...details, items }) : await orderApi.guestCheckout(details, items)
@@ -589,8 +605,8 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   if (confirmed) return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">Order confirmed</span><h1>Thank you for choosing<br/><em>handmade.</em></h1><p>Your order has been received. We’ll send the details and delivery updates to your email.</p><div className="order-number"><span>Order number</span><strong>SNS-20260801-0001</strong><button>Copy</button></div><div className="confirmation-actions"><button className="primary" onClick={() => go('shop')}>Continue shopping</button><button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button></div></main>
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
     <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn || !LIVE_MODE} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{!LIVE_MODE ? 'Available when the store goes live' : isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
-      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address<input required name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>Phone number<input required name="phone" type="tel" defaultValue={isLoggedIn && mode === 'customer' ? user?.phone || '' : ''} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
-        <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className="selected"><input type="radio" checked readOnly/> Email</label><label aria-disabled="true"><input type="radio" disabled/> WhatsApp <small>Setup pending</small></label></div>{accountEmailConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your account email is verified.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy || !checkoutEmail}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && !verificationToken && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm email</button></div>}{verificationToken && <p className="verification-success"><Icon name="check" size={15}/> Email confirmed.</p>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
+      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address<input required name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>Phone number<input required name="phone" type="tel" value={checkoutPhone} onChange={changeCheckoutPhone} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
+        <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className={notificationChannel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'EMAIL'} onChange={() => chooseNotificationChannel('EMAIL')}/> Email</label><label className={notificationChannel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'WHATSAPP'} onChange={() => chooseNotificationChannel('WHATSAPP')}/> WhatsApp</label></div>{accountNotificationConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your account {notificationChannel === 'WHATSAPP' ? 'WhatsApp number' : 'email'} is verified.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy || !notificationDestination}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && !verificationToken && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm {notificationChannel === 'WHATSAPP' ? 'WhatsApp' : 'email'}</button></div>}{verificationToken && <p className="verification-success"><Icon name="check" size={15}/> {notificationChannel === 'WHATSAPP' ? 'WhatsApp number' : 'Email'} confirmed.</p>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
         <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">Choose how to pay</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className={paymentMethod === 'stripe' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')}/><span><b>Credit/debit card or PayNow</b><small>Secure payment powered by Stripe</small></span><strong>Stripe</strong></label><label className={paymentMethod === 'paynow' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'paynow'} onChange={() => setPaymentMethod('paynow')}/><span><b>PayLah QR code</b><small>Scan using your PayLah app</small></span></label></div>{paymentMethod === 'paynow' && <><p className="payment-intro">Open the payment window to scan the merchant QR code.</p><button className="secondary payment-open" type="button" onClick={() => setPaymentOpen(true)}>{paymentConfirmed ? 'View PayLah QR again' : 'Open PayLah payment'} <Icon name="arrow" size={17}/></button>{paymentConfirmed && <p className="payment-status"><Icon name="check" size={15}/> Payment marked as completed</p>}</>}</section>
         <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label>{paymentError && <p className="payment-error" role="alert">{paymentError}</p>}<button className="primary full" disabled={!cart.length || !notificationConfirmed || redirecting || (paymentMethod === 'paynow' && !paymentConfirmed)}>{redirecting ? 'Opening secure checkout…' : paymentMethod === 'stripe' ? `Pay S$${orderTotal.toFixed(2)} with Stripe` : `Confirm payment & place order · S$${orderTotal.toFixed(2)}`} {!redirecting && <Icon name="arrow" size={18}/>}</button><p className="secure">{paymentMethod === 'stripe' ? 'You’ll continue to Stripe’s secure checkout. Card details never touch our servers.' : 'PayNow payment is confirmed manually.'}</p></form>
       {paymentOpen && <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="paynow-modal-title" onClick={() => setPaymentOpen(false)}><div className="payment-modal-panel" onClick={(event) => event.stopPropagation()}><button className="icon-button payment-modal-close" type="button" onClick={() => setPaymentOpen(false)} aria-label="Close PayLah payment"><Icon name="close" /></button><span className="eyebrow">Manual QR payment</span><h2 id="paynow-modal-title">Pay with PayLah</h2><div className="paynow-layout"><img src="/paynow-qr.jpeg" alt="PayLah QR code for Shilp and Soul payment"/><div><h3>Scan to pay S${orderTotal.toFixed(2)}</h3><ol><li>Open your PayLah app and select Scan & Pay.</li><li>Verify the merchant name displayed in the app.</li><li>Enter exactly <strong>S${orderTotal.toFixed(2)}</strong> and complete payment.</li></ol><p>Never proceed if the app shows an unexpected recipient.</p></div></div><label className="checkbox payment-confirmation"><input checked={paymentConfirmed} type="checkbox" onChange={(event) => setPaymentConfirmed(event.target.checked)}/> I have paid S${orderTotal.toFixed(2)} using PayLah</label><button className="primary full" type="button" disabled={!paymentConfirmed} onClick={() => setPaymentOpen(false)}>Done <Icon name="check" size={17}/></button></div></div>}
@@ -605,6 +621,7 @@ function Login({ close, success, continueAsGuest }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [registrationEmail, setRegistrationEmail] = useState('')
+  const [registrationPhone, setRegistrationPhone] = useState('')
   const [verificationId, setVerificationId] = useState(null)
   const [verificationCode, setVerificationCode] = useState('')
   const [verificationToken, setVerificationToken] = useState('')
@@ -612,13 +629,13 @@ function Login({ close, success, continueAsGuest }) {
 
   const requestRegistrationCode = async () => {
     setSubmitting(true);setError('');setVerificationMessage('')
-    try{const result=await authApi.requestVerification(registrationEmail.trim().toLowerCase(),'REGISTRATION');setVerificationId(result.verification_id);setVerificationMessage('A six-digit code was sent to your email.')}
+    try{const result=await authApi.requestVerification(registrationPhone.trim(),'REGISTRATION','WHATSAPP');setVerificationId(result.verification_id);setVerificationMessage('A six-digit code was sent to your WhatsApp number.')}
     catch(requestError){setError(requestError.message)}finally{setSubmitting(false)}
   }
 
   const confirmRegistrationCode = async () => {
     setSubmitting(true);setError('')
-    try{const result=await authApi.verifyCode(verificationId,verificationCode,false);setVerificationToken(result.verification_token);setVerificationMessage('Email verified. You can now create your account.')}
+    try{const result=await authApi.verifyCode(verificationId,verificationCode,false);setVerificationToken(result.verification_token);setVerificationMessage('WhatsApp number verified. You can now create your account.')}
     catch(verifyError){setError(verifyError.message)}finally{setSubmitting(false)}
   }
 
@@ -630,14 +647,14 @@ function Login({ close, success, continueAsGuest }) {
     try {
       startGuestSession()
       if(registering){
-        if(!verificationToken)throw new Error('Verify your email before creating the account.')
-        success(await authApi.register({first_name:data.get('firstName'),last_name:data.get('lastName'),email:registrationEmail.trim().toLowerCase(),phone:data.get('phone'),password:data.get('password'),verification_token:verificationToken}))
+        if(!verificationToken)throw new Error('Verify your WhatsApp number before creating the account.')
+        success(await authApi.register({first_name:data.get('firstName'),last_name:data.get('lastName'),email:registrationEmail.trim().toLowerCase(),phone:registrationPhone.trim(),password:data.get('password'),verification_token:verificationToken}))
       }else success(await authApi.login(data.get('email'), data.get('password')))
     }
     catch (loginError) { setError(loginError.message) }
     finally { setSubmitting(false) }
   }
-  return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>{registering?'Create an account with a verified email for simpler checkout.':'Sign in to revisit your orders and saved details.'}</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>{registering?'Create your account':'Welcome back'}</h2><p>{registering?'Verify your email before your account is created.':'Enter your details to continue.'}</p><form onSubmit={submit}>{registering&&<div className="registration-names"><label>First name<input required name="firstName" autoComplete="given-name"/></label><label>Last name<input required name="lastName" autoComplete="family-name"/></label></div>}<label>Email address<input required name="email" type="email" autoComplete="email" value={registering?registrationEmail:undefined} onChange={registering?(event)=>{setRegistrationEmail(event.target.value);setVerificationId(null);setVerificationToken('');setVerificationCode('')}:undefined} placeholder="you@example.com"/></label>{registering&&<><div className="registration-verification"><button className="secondary" type="button" disabled={submitting||!registrationEmail} onClick={requestRegistrationCode}>{verificationId?'Resend code':'Send verification code'}</button>{verificationId&&!verificationToken&&<><input aria-label="Six-digit verification code" inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event)=>setVerificationCode(event.target.value.replace(/\D/g,'').slice(0,6))}/><button className="secondary" type="button" disabled={submitting||verificationCode.length!==6} onClick={confirmRegistrationCode}>Verify</button></>}</div>{verificationMessage&&<p className="verification-note" role="status">{verificationMessage}</p>}<label>Phone number<input name="phone" type="tel" autoComplete="tel" placeholder="+65 0000 0000"/></label></>}<label><span>Password {!registering&&<button type="button">Forgot password?</button>}</span><input required name="password" type="password" minLength={registering?12:undefined} autoComplete={registering?'new-password':'current-password'} placeholder="••••••••••••"/></label>{error&&<p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting||(registering&&!verificationToken)}>{submitting?'Please wait…':registering?'Create account':'Sign in'} {!submitting&&<Icon name="arrow" size={18}/>}</button></form>{LIVE_MODE?<><div className="or"><span>or</span></div><p className="signup">{registering?'Already have an account?':'New to Shilp & Soul?'} <button type="button" onClick={()=>{setRegistering(!registering);setError('')}}>{registering?'Sign in':'Create an account'}</button></p><button className="guest-link" onClick={continueAsGuest}>Continue as guest</button></>:<p className="development-notice">New accounts and guest checkout will be available when the store goes live.</p>}</div></section>
+  return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>{registering?'Create an account with a verified WhatsApp number for simpler checkout.':'Sign in to revisit your orders and saved details.'}</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>{registering?'Create your account':'Welcome back'}</h2><p>{registering?'Verify your WhatsApp number before your account is created.':'Enter your details to continue.'}</p><form onSubmit={submit}>{registering&&<div className="registration-names"><label>First name<input required name="firstName" autoComplete="given-name"/></label><label>Last name<input required name="lastName" autoComplete="family-name"/></label></div>}<label>Email address<input required name="email" type="email" autoComplete="email" value={registering?registrationEmail:undefined} onChange={registering?(event)=>setRegistrationEmail(event.target.value):undefined} placeholder="you@example.com"/></label>{registering&&<><label>WhatsApp number<input required name="phone" type="tel" autoComplete="tel" value={registrationPhone} onChange={(event)=>{setRegistrationPhone(event.target.value);setVerificationId(null);setVerificationToken('');setVerificationCode('');setVerificationMessage('')}} placeholder="+65 0000 0000"/></label><div className="registration-verification"><button className="secondary" type="button" disabled={submitting||!registrationPhone} onClick={requestRegistrationCode}>{verificationId?'Resend code':'Send WhatsApp code'}</button>{verificationId&&!verificationToken&&<><input aria-label="Six-digit verification code" inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event)=>setVerificationCode(event.target.value.replace(/\D/g,'').slice(0,6))}/><button className="secondary" type="button" disabled={submitting||verificationCode.length!==6} onClick={confirmRegistrationCode}>Verify</button></>}</div>{verificationMessage&&<p className="verification-note" role="status">{verificationMessage}</p>}</>}<label><span>Password {!registering&&<button type="button">Forgot password?</button>}</span><input required name="password" type="password" minLength={registering?12:undefined} autoComplete={registering?'new-password':'current-password'} placeholder="••••••••••••"/></label>{error&&<p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting||(registering&&!verificationToken)}>{submitting?'Please wait…':registering?'Create account':'Sign in'} {!submitting&&<Icon name="arrow" size={18}/>}</button></form>{LIVE_MODE?<><div className="or"><span>or</span></div><p className="signup">{registering?'Already have an account?':'New to Shilp & Soul?'} <button type="button" onClick={()=>{setRegistering(!registering);setError('')}}>{registering?'Sign in':'Create an account'}</button></p><button className="guest-link" onClick={continueAsGuest}>Continue as guest</button></>:<p className="development-notice">New accounts and guest checkout will be available when the store goes live.</p>}</div></section>
 }
 
 function TrackOrder() {
@@ -755,6 +772,92 @@ function Orders({ products }) {
       </article> : <div className="order-detail order-detail-empty"><Icon name="search" size={28}/><h2>No order selected</h2><p>Search by an order number from your account.</p></div>}
     </div>}
   </main>
+}
+
+const greetingMessage = { id: 'welcome', role: 'assistant', text: 'Hello! I can help you find products, explain our collection, shipping and ordering, or note down something you wish we carried.' }
+
+function ShopAssistant({ products, categories, user }) {
+  const [open, setOpen] = useState(false)
+  const [messages, setMessages] = useState([greetingMessage])
+  const [draft, setDraft] = useState('')
+  const [requesting, setRequesting] = useState(false)
+  const [requestedProduct, setRequestedProduct] = useState('')
+  const [category, setCategory] = useState('')
+  const [details, setDetails] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const answer = (question) => {
+    const query = question.toLowerCase().trim()
+    if (/shipping|delivery|return/.test(query)) return 'Delivery is complimentary for orders over S$150; otherwise it is S$8. Shipping is calculated at checkout. For return help, please use Contact us in the footer.'
+    if (/site|about|who are|shilp|artisan|handmade/.test(query)) return 'Shilp & Soul curates thoughtful, handmade objects from artisans across India—pieces made slowly and chosen for everyday life.'
+    if (/order|track/.test(query)) return user ? 'Open “My orders” in the header to see your order history and status.' : 'Choose “Track order” in the header and enter your order number and checkout email.'
+    const terms = query.split(/\W+/).filter((term) => term.length > 2 && !['have', 'show', 'find', 'looking', 'want', 'need', 'product'].includes(term))
+    const matches = products.filter((product) => {
+      const searchable = `${product.name} ${product.craft} ${product.description || ''}`.toLowerCase()
+      return terms.some((term) => searchable.includes(term))
+    }).slice(0, 3)
+    if (matches.length) return `I found ${matches.map((product) => `${product.name} (${product.stock > 0 ? `S$${product.price.toFixed(2)}` : 'out of stock'})`).join(', ')}. Use the shop search to view them.`
+    setRequestedProduct(question.trim())
+    setRequesting(true)
+    return 'I could not find a matching item in our current collection. Would you like to share it with our buying team? Add a category and any useful details below.'
+  }
+
+  const send = (event) => {
+    event.preventDefault()
+    const question = draft.trim()
+    if (!question) return
+    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', text: question }, { id: crypto.randomUUID(), role: 'assistant', text: answer(question) }])
+    setDraft('')
+  }
+
+  const submitRequirement = async (event) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      await marketRequirementApi.create({
+        product_requested: requestedProduct.trim(),
+        free_text: details.trim(),
+        category: category.trim(),
+        requester_name: user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : null,
+        requester_email: user?.email || null,
+        source: 'STOREFRONT_CHATBOT',
+      })
+      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', text: 'Thank you—your request has been shared with our team.' }])
+      setRequesting(false); setRequestedProduct(''); setCategory(''); setDetails('')
+    } catch (error) {
+      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', text: error.status === 404 ? 'The request service is not available yet. Please contact us and mention this product.' : `I could not save that request: ${error.message}` }])
+    } finally { setSaving(false) }
+  }
+
+  return <div className={`shop-assistant ${open ? 'open' : ''}`}>
+    {open && <section className="assistant-panel" aria-label="Shopping assistant">
+      <header><div><span className="eyebrow">Here to help</span><h2>Shilp assistant</h2></div><button className="icon-button" onClick={() => setOpen(false)} aria-label="Close assistant"><Icon name="close"/></button></header>
+      <div className="assistant-messages" aria-live="polite">{messages.map((message) => <p className={message.role} key={message.id}>{message.text}</p>)}</div>
+      {requesting && <form className="requirement-form" onSubmit={submitRequirement}><label>Product requested<input required value={requestedProduct} onChange={(event) => setRequestedProduct(event.target.value)}/></label><label>Category<select required value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Choose a category</option>{categories.map((item) => <option value={item.name} key={item.id}>{item.name}</option>)}<option value="Other">Other</option></select></label><label>More details (optional)<textarea value={details} onChange={(event) => setDetails(event.target.value)} placeholder="Style, material, colour, budget…"/></label><div><button type="button" className="secondary" onClick={() => setRequesting(false)}>Not now</button><button className="primary" disabled={saving}>{saving ? 'Sharing…' : 'Share request'}</button></div></form>}
+      <form className="assistant-input" onSubmit={send}><label className="sr-only" htmlFor="assistant-question">Ask a question</label><input id="assistant-question" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ask about a product…"/><button aria-label="Send question" disabled={!draft.trim()}><Icon name="send" size={17}/></button></form>
+    </section>}
+    <button className="assistant-launcher" onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-label={open ? 'Close shopping assistant' : 'Open shopping assistant'}><Icon name={open ? 'close' : 'chat'}/><span>{open ? 'Close' : 'Can we help?'}</span></button>
+  </div>
+}
+
+function MarketRequirementsAdmin({ user }) {
+  const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(String(user?.role || user?.user_role || '').toUpperCase())
+  const [records, setRecords] = useState([])
+  const [loading, setLoading] = useState(isAdmin)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!isAdmin) return
+    marketRequirementApi.list().then(setRecords).catch((loadError) => setError(loadError.message || 'Unable to load market requirements.')).finally(() => setLoading(false))
+  }, [isAdmin])
+  const changeStatus = async (record, status) => {
+    try {
+      const updated = await marketRequirementApi.update(record.id, { status })
+      setRecords((current) => current.map((item) => String(item.id) === String(record.id) ? { ...item, ...updated, status } : item))
+    } catch (updateError) { setError(updateError.message || 'Unable to update this request.') }
+  }
+  if (!user) return <main className="requirements-page"><div className="catalog-status error">Sign in with an admin account to view market requirements.</div></main>
+  if (!isAdmin) return <main className="requirements-page"><div className="catalog-status error">You do not have permission to view this admin screen.</div></main>
+  return <main className="requirements-page"><span className="eyebrow">Buying intelligence</span><h1>Market requirements</h1><p>Products customers asked for when no catalog match was available.</p>{loading && <div className="catalog-status">Loading requests…</div>}{error && <div className="catalog-status error" role="alert">{error}</div>}{!loading && !error && records.length === 0 && <div className="catalog-status">No product requests yet.</div>}{records.length > 0 && <div className="requirements-table-wrap"><table><thead><tr><th>Requested product</th><th>Category</th><th>Customer details</th><th>Requested</th><th>Status</th></tr></thead><tbody>{records.map((record) => <tr key={record.id}><td><strong>{record.product_requested}</strong><p>{record.free_text || 'No additional detail'}</p></td><td>{record.category}</td><td>{record.requester_name || 'Guest'}<small>{record.requester_email}</small></td><td>{record.created_at ? new Date(record.created_at).toLocaleDateString('en-SG') : '—'}</td><td><select value={record.status || 'NEW'} onChange={(event) => changeStatus(record, event.target.value)}><option value="NEW">New</option><option value="REVIEWING">Reviewing</option><option value="PLANNED">Planned</option><option value="DECLINED">Declined</option></select></td></tr>)}</tbody></table></div>}</main>
 }
 
 export default App
