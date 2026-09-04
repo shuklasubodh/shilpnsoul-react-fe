@@ -618,6 +618,20 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
       if (!notificationConfirmed) throw new Error('Confirm the selected notification channel before placing your order.')
       const pendingKey = pendingStripeOrderKey(user?.id || 'guest')
       try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
+      if (pending?.id) {
+        try {
+          const previousOrder = await paymentApi.orderResult(pending.id, pending.accessToken)
+          if (previousOrder.payment_status === 'PAID' || previousOrder.status === 'CANCELLED') {
+            sessionStorage.removeItem(pendingKey)
+            pending = null
+          }
+        } catch (error) {
+          if ([403, 404].includes(error.status)) {
+            sessionStorage.removeItem(pendingKey)
+            pending = null
+          } else throw error
+        }
+      }
       if (!pending?.id) {
         const details = {
           shipping_name: data.get('name'), shipping_phone: submittedPhoneE164, shipping_address: data.get('shippingAddress'),
@@ -634,11 +648,6 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
       if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
       window.location.assign(result.checkout_url)
     } catch (error) {
-      if (error.status === 409 && /already paid/i.test(error.message) && pending?.id) {
-        setRedirecting(false)
-        onConfirm(pending)
-        return
-      }
       setPaymentError(error.message || 'Stripe checkout could not be started. Please try again.')
       setRedirecting(false)
     }
