@@ -79,6 +79,7 @@ export const orderApi = {
 
 export const paymentApi = {
   createStripeCheckout: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
+  checkoutResult: (sessionId) => request(`/payments/checkout-sessions/${encodeURIComponent(sessionId)}/result`, { auth: false }),
 }
 
 // Backed by the market_requirements table in the commerce API. Creation is

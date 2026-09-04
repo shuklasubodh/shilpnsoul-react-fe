@@ -8,7 +8,16 @@ const LIVE_MODE = import.meta.env.VITE_LIVE_MODE === 'true'
 const GUEST_CART_KEY = 'shoppingCart:guest'
 const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
 const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
-const initialView = () => window.location.pathname === '/admin/market-requirements' ? 'requirements-admin' : ['/payment/cancel', '/payment/success'].includes(paymentReturn()) ? 'checkout' : 'shop'
+const isStripeSuccessReturn = () => paymentReturn() === '/payment/success' || new URLSearchParams(window.location.search).has('session_id')
+const initialView = () => window.location.pathname === '/admin/market-requirements' ? 'requirements-admin' : paymentReturn() === '/payment/cancel' || isStripeSuccessReturn() ? 'checkout' : 'shop'
+const toE164 = (value, defaultCountryCode = '65') => {
+  const raw = String(value || '').trim()
+  const digits = raw.replace(/\D/g, '')
+  if (!digits) return ''
+  if (raw.startsWith('+')) return `+${digits}`
+  if (raw.startsWith('00')) return `+${digits.slice(2)}`
+  return digits.length === 8 ? `+${defaultCountryCode}${digits}` : `+${digits}`
+}
 const hasConstrainedConnection = () => {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
   return Boolean(connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || ''))
@@ -85,7 +94,7 @@ function App() {
   const [catalogError, setCatalogError] = useState('')
   const [cart, setCart] = useState(() => user ? [] : savedGuestCart())
   const [checkoutMode, setCheckoutMode] = useState(() => user || !LIVE_MODE ? 'customer' : 'guest')
-  const [confirmed, setConfirmed] = useState(() => paymentReturn() === '/payment/success')
+  const [confirmed, setConfirmed] = useState(isStripeSuccessReturn)
   const [toast, setToast] = useState(() => paymentReturn() === '/payment/cancel' ? 'Payment cancelled. Your bag has been kept.' : '')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -110,7 +119,7 @@ function App() {
         setConfirmed(false)
         setView('checkout')
         setToast('Payment cancelled. Your bag has been kept.')
-      } else if (path === '/payment/success') {
+      } else if (isStripeSuccessReturn()) {
         setConfirmed(true)
         setView('checkout')
         setCart([])
@@ -260,7 +269,6 @@ function App() {
   const go = (next) => {
     setView(next)
     setCartOpen(false)
-    if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const showProducts = () => {
@@ -512,40 +520,55 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   const [notificationChannel, setNotificationChannel] = useState('EMAIL')
   const [verificationId, setVerificationId] = useState(null)
   const [verificationToken, setVerificationToken] = useState('')
+  const [verifiedChannel, setVerifiedChannel] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [verificationBusy, setVerificationBusy] = useState(false)
   const [verificationMessage, setVerificationMessage] = useState('')
-  const notificationDestination = notificationChannel === 'WHATSAPP' ? checkoutPhone.trim() : checkoutEmail.trim().toLowerCase()
-  const accountNotificationConfirmed = Boolean(isLoggedIn && (notificationChannel === 'EMAIL'
-    ? user?.email_verified_at && checkoutEmail.trim().toLowerCase() === String(user.email).toLowerCase()
-    : user?.phone_verified_at && checkoutPhone.replace(/\D/g, '') === String(user?.phone || '').replace(/\D/g, '')))
+  const [phoneFormatError, setPhoneFormatError] = useState('')
+  const [confirmedOrder, setConfirmedOrder] = useState(null)
+  const [confirmationError, setConfirmationError] = useState('')
+  const isPhoneNotification = notificationChannel === 'WHATSAPP' || notificationChannel === 'SMS'
+  const notificationChannelName = notificationChannel === 'WHATSAPP' ? 'WhatsApp' : notificationChannel === 'SMS' ? 'SMS' : 'email'
+  const notificationDestinationName = isPhoneNotification ? 'phone number' : 'email'
+  const normalizedCheckoutPhone = toE164(checkoutPhone)
+  const smsNumberIsE164 = /^\+[1-9]\d{7,14}$/.test(checkoutPhone.trim())
+  const notificationDestination = notificationChannel === 'SMS' ? checkoutPhone.trim() : notificationChannel === 'WHATSAPP' ? normalizedCheckoutPhone : checkoutEmail.trim().toLowerCase()
+  const accountNotificationConfirmed = Boolean(isLoggedIn && (user?.email_verified_at || user?.phone_verified_at))
   const notificationConfirmed = accountNotificationConfirmed || Boolean(verificationToken)
 
-  const resetVerification = () => {
+  const resetVerification = (clearConfirmed = true) => {
     setVerificationId(null)
-    setVerificationToken('')
+    if (clearConfirmed) {
+      setVerificationToken('')
+      setVerifiedChannel('')
+    }
     setVerificationCode('')
     setVerificationMessage('')
   }
 
   const changeCheckoutEmail = (event) => {
     setCheckoutEmail(event.target.value)
-    resetVerification()
+    resetVerification(verifiedChannel !== 'PHONE')
   }
 
-  const changeCheckoutPhone = (event) => { setCheckoutPhone(event.target.value); resetVerification() }
-  const chooseNotificationChannel = (channel) => { setNotificationChannel(channel); resetVerification(); setPaymentError('') }
+  const changeCheckoutPhone = (event) => { setCheckoutPhone(event.target.value); setPhoneFormatError(''); resetVerification(verifiedChannel !== 'EMAIL') }
+  const chooseNotificationChannel = (channel) => { setNotificationChannel(channel); setPhoneFormatError(''); resetVerification(false); setPaymentError('') }
 
   const requestCheckoutCode = async () => {
     setVerificationBusy(true)
     setVerificationMessage('')
     setPaymentError('')
     try {
+      if (notificationChannel === 'SMS' && !smsNumberIsE164) {
+        setPhoneFormatError('Enter a valid SMS number in E.164 format: + followed by the country code and subscriber number, with no spaces. Example: +6591234567.')
+        return
+      }
+      if (notificationChannel === 'WHATSAPP' && !/^\+[1-9]\d{7,14}$/.test(notificationDestination)) throw new Error('Enter a valid phone number, for example +6591234567.')
       const result = await authApi.requestVerification(notificationDestination, 'CHECKOUT', notificationChannel)
-      if (result.verified) setVerificationMessage(`Your saved ${notificationChannel === 'WHATSAPP' ? 'WhatsApp number' : 'email'} is already verified.`)
+      if (result.verified) setVerificationMessage(`Your saved ${notificationDestinationName} is already verified.`)
       else {
         setVerificationId(result.verification_id)
-        setVerificationMessage(`A six-digit code was sent by ${notificationChannel === 'WHATSAPP' ? 'WhatsApp' : 'email'}.`)
+        setVerificationMessage(`A six-digit code was sent by ${notificationChannelName}.`)
       }
     } catch (error) { setPaymentError(error.message) }
     finally { setVerificationBusy(false) }
@@ -557,7 +580,8 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     try {
       const result = await authApi.verifyCode(verificationId, verificationCode, isLoggedIn)
       setVerificationToken(result.verification_token)
-      setVerificationMessage(`${notificationChannel === 'WHATSAPP' ? 'WhatsApp number' : 'Email'} confirmed for this order.`)
+      setVerifiedChannel(notificationChannel === 'EMAIL' ? 'EMAIL' : 'PHONE')
+      setVerificationMessage(`${notificationDestinationName === 'email' ? 'Email' : 'Phone number'} confirmed for this order.`)
     } catch (error) { setPaymentError(error.message) }
     finally { setVerificationBusy(false) }
   }
@@ -567,15 +591,23 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     setPaymentError('')
     setRedirecting(true)
     const data = new FormData(event.currentTarget)
+    const submittedPhone = String(data.get('phone') || '').trim()
+    const submittedEmail = String(data.get('email') || '').trim().toLowerCase()
+    const submittedPhoneE164 = toE164(submittedPhone)
     try {
+      if (notificationChannel === 'SMS' && !/^\+[1-9]\d{7,14}$/.test(submittedPhone)) {
+        setPhoneFormatError('Enter a valid SMS number in E.164 format: + followed by the country code and subscriber number, with no spaces. Example: +6591234567.')
+        setRedirecting(false)
+        return
+      }
       if (!notificationConfirmed) throw new Error('Confirm the selected notification channel before placing your order.')
       const pendingKey = pendingStripeOrderKey(user?.id || 'guest')
       let pending
       try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
       if (!pending?.id) {
         const details = {
-          shipping_name: data.get('name'), shipping_phone: data.get('phone'), shipping_address: data.get('shippingAddress'),
-          contact_email: checkoutEmail.trim().toLowerCase(), contact_phone: checkoutPhone.trim(), payment_method: paymentMethod === 'stripe' ? 'STRIPE' : 'CASH',
+          shipping_name: data.get('name'), shipping_phone: submittedPhoneE164, shipping_address: data.get('shippingAddress'),
+          contact_email: submittedEmail, contact_phone: submittedPhoneE164, payment_method: paymentMethod === 'stripe' ? 'STRIPE' : 'CASH',
           notification_channel: notificationChannel, notification_destination: notificationDestination, notification_verification_token: verificationToken,
         }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
@@ -602,14 +634,27 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [paymentOpen])
 
-  if (confirmed) return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">Order confirmed</span><h1>Thank you for choosing<br/><em>handmade.</em></h1><p>Your order has been received. We’ll send the details and delivery updates to your email.</p><div className="order-number"><span>Order number</span><strong>SNS-20260801-0001</strong><button>Copy</button></div><div className="confirmation-actions"><button className="primary" onClick={() => go('shop')}>Continue shopping</button><button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button></div></main>
+  useEffect(() => {
+    if (!confirmed) return
+    const sessionId = new URLSearchParams(window.location.search).get('session_id')
+    if (!sessionId) return
+    paymentApi.checkoutResult(sessionId)
+      .then(setConfirmedOrder)
+      .catch((error) => setConfirmationError(error.message || 'Order details could not be loaded.'))
+  }, [confirmed])
+
+  if (confirmed) {
+    const channel = confirmedOrder?.notification_channel === 'WHATSAPP' ? 'WhatsApp' : confirmedOrder?.notification_channel === 'SMS' ? 'SMS' : 'email'
+    return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">Order confirmed</span><h1>Thank you for choosing<br/><em>handmade.</em></h1><p>Your order has been received. We’ll send the details and delivery updates by {channel}.</p><div className="order-number"><span>Order number</span><strong>{confirmedOrder?.order_number || 'Loading…'}</strong><button disabled={!confirmedOrder?.order_number} onClick={() => navigator.clipboard.writeText(confirmedOrder.order_number)}>Copy</button></div>{confirmationError && <p className="payment-error" role="alert">{confirmationError}</p>}<div className="confirmation-actions"><button className="primary" onClick={() => go('shop')}>Continue shopping</button><button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button></div></main>
+  }
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
     <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn || !LIVE_MODE} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{!LIVE_MODE ? 'Available when the store goes live' : isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
-      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address<input required name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>Phone number<input required name="phone" type="tel" value={checkoutPhone} onChange={changeCheckoutPhone} placeholder="+65 0000 0000"/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
-        <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className={notificationChannel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'EMAIL'} onChange={() => chooseNotificationChannel('EMAIL')}/> Email</label><label className={notificationChannel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'WHATSAPP'} onChange={() => chooseNotificationChannel('WHATSAPP')}/> WhatsApp</label></div>{accountNotificationConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your account {notificationChannel === 'WHATSAPP' ? 'WhatsApp number' : 'email'} is verified.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy || !notificationDestination}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && !verificationToken && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm {notificationChannel === 'WHATSAPP' ? 'WhatsApp' : 'email'}</button></div>}{verificationToken && <p className="verification-success"><Icon name="check" size={15}/> {notificationChannel === 'WHATSAPP' ? 'WhatsApp number' : 'Email'} confirmed.</p>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
+      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address{notificationChannel === 'EMAIL' ? ' *' : ' (optional)'}<input required={notificationChannel === 'EMAIL'} name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>Phone number{isPhoneNotification ? ' *' : ' (optional)'}<input required={isPhoneNotification} name="phone" type="tel" value={checkoutPhone} onChange={changeCheckoutPhone} placeholder="+6591234567" title="Use international E.164 format, for example +6591234567" aria-invalid={notificationChannel === 'SMS' && checkoutPhone.length > 0 && !smsNumberIsE164}/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
+        <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className={notificationChannel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'EMAIL'} onChange={() => chooseNotificationChannel('EMAIL')}/> Email</label><label className={notificationChannel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'WHATSAPP'} onChange={() => chooseNotificationChannel('WHATSAPP')}/> WhatsApp</label><label className={notificationChannel === 'SMS' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'SMS'} onChange={() => chooseNotificationChannel('SMS')}/> SMS</label></div>{accountNotificationConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your account identity is already verified.</p> : verificationToken ? <p className="verification-success"><Icon name="check" size={15}/> Checkout contact confirmed.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy || !notificationDestination}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm {notificationChannelName}</button></div>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
         <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">Choose how to pay</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className={paymentMethod === 'stripe' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')}/><span><b>Credit/debit card or PayNow</b><small>Secure payment powered by Stripe</small></span><strong>Stripe</strong></label><label className={paymentMethod === 'paynow' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'paynow'} onChange={() => setPaymentMethod('paynow')}/><span><b>PayLah QR code</b><small>Scan using your PayLah app</small></span></label></div>{paymentMethod === 'paynow' && <><p className="payment-intro">Open the payment window to scan the merchant QR code.</p><button className="secondary payment-open" type="button" onClick={() => setPaymentOpen(true)}>{paymentConfirmed ? 'View PayLah QR again' : 'Open PayLah payment'} <Icon name="arrow" size={17}/></button>{paymentConfirmed && <p className="payment-status"><Icon name="check" size={15}/> Payment marked as completed</p>}</>}</section>
         <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label>{paymentError && <p className="payment-error" role="alert">{paymentError}</p>}<button className="primary full" disabled={!cart.length || !notificationConfirmed || redirecting || (paymentMethod === 'paynow' && !paymentConfirmed)}>{redirecting ? 'Opening secure checkout…' : paymentMethod === 'stripe' ? `Pay S$${orderTotal.toFixed(2)} with Stripe` : `Confirm payment & place order · S$${orderTotal.toFixed(2)}`} {!redirecting && <Icon name="arrow" size={18}/>}</button><p className="secure">{paymentMethod === 'stripe' ? 'You’ll continue to Stripe’s secure checkout. Card details never touch our servers.' : 'PayNow payment is confirmed manually.'}</p></form>
       {paymentOpen && <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="paynow-modal-title" onClick={() => setPaymentOpen(false)}><div className="payment-modal-panel" onClick={(event) => event.stopPropagation()}><button className="icon-button payment-modal-close" type="button" onClick={() => setPaymentOpen(false)} aria-label="Close PayLah payment"><Icon name="close" /></button><span className="eyebrow">Manual QR payment</span><h2 id="paynow-modal-title">Pay with PayLah</h2><div className="paynow-layout"><img src="/paynow-qr.jpeg" alt="PayLah QR code for Shilp and Soul payment"/><div><h3>Scan to pay S${orderTotal.toFixed(2)}</h3><ol><li>Open your PayLah app and select Scan & Pay.</li><li>Verify the merchant name displayed in the app.</li><li>Enter exactly <strong>S${orderTotal.toFixed(2)}</strong> and complete payment.</li></ol><p>Never proceed if the app shows an unexpected recipient.</p></div></div><label className="checkbox payment-confirmation"><input checked={paymentConfirmed} type="checkbox" onChange={(event) => setPaymentConfirmed(event.target.checked)}/> I have paid S${orderTotal.toFixed(2)} using PayLah</label><button className="primary full" type="button" disabled={!paymentConfirmed} onClick={() => setPaymentOpen(false)}>Done <Icon name="check" size={17}/></button></div></div>}
+      {phoneFormatError && <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="phone-format-modal-title" onClick={() => setPhoneFormatError('')}><div className="payment-modal-panel phone-format-modal" onClick={(event) => event.stopPropagation()}><button className="icon-button payment-modal-close" type="button" onClick={() => setPhoneFormatError('')} aria-label="Close phone number error"><Icon name="close" /></button><span className="eyebrow">Invalid SMS number</span><h2 id="phone-format-modal-title">Use E.164 format</h2><p>{phoneFormatError}</p><button className="primary full" type="button" onClick={() => setPhoneFormatError('')}>Correct phone number</button></div></div>}
     </section><OrderSummary cart={cart} total={total}/></div>
   </main>
 }
