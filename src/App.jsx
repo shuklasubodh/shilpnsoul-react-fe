@@ -637,11 +637,17 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   useEffect(() => {
     if (!confirmed) return
     const sessionId = new URLSearchParams(window.location.search).get('session_id')
-    if (!sessionId) return
-    paymentApi.checkoutResult(sessionId)
+    let pending
+    try { pending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id || 'guest'))) } catch { pending = null }
+    const resultRequest = sessionId
+      ? paymentApi.checkoutResult(sessionId)
+      : pending?.id
+        ? paymentApi.orderResult(pending.id, pending.accessToken)
+        : Promise.reject(new Error('Order reference is unavailable. Please use order tracking to find your order.'))
+    resultRequest
       .then(setConfirmedOrder)
       .catch((error) => setConfirmationError(error.message || 'Order details could not be loaded.'))
-  }, [confirmed])
+  }, [confirmed, user?.id])
 
   if (confirmed) {
     const channel = confirmedOrder?.notification_channel === 'WHATSAPP' ? 'WhatsApp' : confirmedOrder?.notification_channel === 'SMS' ? 'SMS' : 'email'
