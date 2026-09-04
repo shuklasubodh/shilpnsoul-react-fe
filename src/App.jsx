@@ -95,6 +95,7 @@ function App() {
   const [cart, setCart] = useState(() => user ? [] : savedGuestCart())
   const [checkoutMode, setCheckoutMode] = useState(() => user || !LIVE_MODE ? 'customer' : 'guest')
   const [confirmed, setConfirmed] = useState(isStripeSuccessReturn)
+  const [confirmationReference, setConfirmationReference] = useState(null)
   const [toast, setToast] = useState(() => paymentReturn() === '/payment/cancel' ? 'Payment cancelled. Your bag has been kept.' : '')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -120,11 +121,15 @@ function App() {
         setView('checkout')
         setToast('Payment cancelled. Your bag has been kept.')
       } else if (isStripeSuccessReturn()) {
+        let pending
+        try { pending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id || 'guest'))) } catch { pending = null }
+        setConfirmationReference(pending)
         setConfirmed(true)
         setView('checkout')
         setCart([])
+        sessionStorage.removeItem(GUEST_CART_KEY)
+        sessionStorage.removeItem(pendingStripeOrderKey(user?.id || 'guest'))
         if (user?.id) {
-          sessionStorage.removeItem(pendingStripeOrderKey(user.id))
           cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
         }
       }
@@ -304,6 +309,15 @@ function App() {
     setToast('You have been signed out')
   }
 
+  const completeOrder = (pending) => {
+    setConfirmationReference(pending || null)
+    setConfirmed(true)
+    setCart([])
+    sessionStorage.removeItem(GUEST_CART_KEY)
+    sessionStorage.removeItem(pendingStripeOrderKey(user?.id || 'guest'))
+    if (user?.id) cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -325,7 +339,7 @@ function App() {
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
       {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} />}
-      {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={() => setConfirmed(true)} confirmed={confirmed} go={go} />}
+      {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
       {view === 'orders' && <Orders products={products} />}
@@ -506,7 +520,7 @@ function CartDrawer({ cart, total, updateQuantity, close, checkout }) {
   </aside>
 }
 
-function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, confirmed, go }) {
+function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, confirmed, confirmationReference, go }) {
   const delivery = total >= 150 ? 0 : 8
   const orderTotal = total + delivery
   const customerName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email || 'Customer'
@@ -642,8 +656,9 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   useEffect(() => {
     if (!confirmed) return
     const sessionId = new URLSearchParams(window.location.search).get('session_id')
-    let pending
-    try { pending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id || 'guest'))) } catch { pending = null }
+    let savedPending
+    try { savedPending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id || 'guest'))) } catch { savedPending = null }
+    const pending = confirmationReference || savedPending
     const resultRequest = sessionId
       ? paymentApi.checkoutResult(sessionId)
       : pending?.id
@@ -652,7 +667,7 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     resultRequest
       .then(setConfirmedOrder)
       .catch((error) => setConfirmationError(error.message || 'Order details could not be loaded.'))
-  }, [confirmed, user?.id])
+  }, [confirmed, confirmationReference, user?.id])
 
   if (confirmed) {
     const channel = confirmedOrder?.notification_channel === 'WHATSAPP' ? 'WhatsApp' : confirmedOrder?.notification_channel === 'SMS' ? 'SMS' : 'email'
