@@ -73,7 +73,9 @@ export const orderApi = {
   get: (orderNumber) => request(`/orders/${encodeURIComponent(orderNumber)}`),
   removeFromHistory: (orderId) => request(`/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' }),
   resendSummary: (orderId, channel) => request(`/orders/${encodeURIComponent(orderId)}/notifications/resend`, { method: 'POST', body: JSON.stringify({ channel }) }),
+  notificationStatus: (orderId, channel) => request(`/orders/${encodeURIComponent(orderId)}/notifications/status?channel=${encodeURIComponent(channel)}`),
   resendGuestSummary: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/resend`, { auth: false, method: 'POST', headers: { 'X-Order-Access-Token': accessToken } }),
+  guestNotificationStatus: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/status`, { auth: false, headers: { 'X-Order-Access-Token': accessToken } }),
   track: (orderNumber, channel, destination) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ orderNumber, channel, destination }) }),
 }
 
