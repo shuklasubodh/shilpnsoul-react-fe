@@ -739,6 +739,7 @@ function Login({ close, success, continueAsGuest }) {
 
 function TrackOrder() {
   const [result, setResult] = useState(null)
+  const [channel, setChannel] = useState('EMAIL')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [notificationMessage, setNotificationMessage] = useState('')
@@ -749,7 +750,7 @@ function TrackOrder() {
     setLoading(true)
     const data = new FormData(event.currentTarget)
     try {
-      setResult(await orderApi.track(String(data.get('orderNumber')).trim(), String(data.get('email')).trim().toLowerCase()))
+      setResult(await orderApi.track(String(data.get('orderNumber')).trim(), channel, String(data.get('destination')).trim()))
     } catch (trackError) {
       setError(trackError.message || 'Unable to track this order.')
     } finally {
@@ -758,12 +759,14 @@ function TrackOrder() {
   }
   const resend = async () => {
     setLoading(true);setError('');setNotificationMessage('')
-    try{await orderApi.resendGuestSummary(result.id,result.order_access_token);setNotificationMessage('Order summary sent to your confirmed email.')}
+    try{await orderApi.resendGuestSummary(result.id,result.order_access_token);const method=result.notification_channel==='WHATSAPP'?'WhatsApp':result.notification_channel==='SMS'?'SMS':'email';setNotificationMessage(`Order summary sent by ${method}.`)}
     catch(resendError){setError(resendError.message||'Unable to resend the order summary.')}finally{setLoading(false)}
   }
   const status = String(result?.status || '').toUpperCase()
   const progress = { PENDING: 15, CONFIRMED: 30, PROCESSING: 50, SHIPPED: 75, DELIVERED: 100 }[status] || 0
-  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Enter the order number and the same email address used during guest checkout.</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><label>Email address<input required name="email" type="email" placeholder="you@example.com" autoComplete="email"/></label><button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p><button className="secondary" type="button" onClick={resend} disabled={loading}>Resend order email</button>{notificationMessage&&<p className="verification-success" role="status">{notificationMessage}</p>}</div>}</div></main>
+  const channelName = channel === 'WHATSAPP' ? 'WhatsApp' : channel === 'SMS' ? 'SMS' : 'Email'
+  const resultChannelName = result?.notification_channel === 'WHATSAPP' ? 'WhatsApp' : result?.notification_channel === 'SMS' ? 'SMS' : 'email'
+  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Use the notification method and destination captured during guest checkout.</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><div className="notification-channels" role="radiogroup" aria-label="Tracking contact method"><label className={channel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'EMAIL'} onChange={() => setChannel('EMAIL')}/> Email</label><label className={channel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'WHATSAPP'} onChange={() => setChannel('WHATSAPP')}/> WhatsApp</label><label className={channel === 'SMS' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'SMS'} onChange={() => setChannel('SMS')}/> SMS</label></div><label>{channelName} {channel === 'EMAIL' ? 'address' : 'number'}<input required name="destination" type={channel === 'EMAIL' ? 'email' : 'tel'} placeholder={channel === 'EMAIL' ? 'you@example.com' : '+6591234567'} autoComplete={channel === 'EMAIL' ? 'email' : 'tel'}/></label><button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p><button className="secondary" type="button" onClick={resend} disabled={loading}>Resend by {resultChannelName}</button>{notificationMessage&&<p className="verification-success" role="status">{notificationMessage}</p>}</div>}</div></main>
 }
 
 function Orders({ products }) {
@@ -819,12 +822,12 @@ function Orders({ products }) {
       setError(removeError.message || 'Unable to remove this order from your history.')
     } finally { setRemoving(false) }
   }
-  const resendSelectedOrder = async () => {
+  const resendSelectedOrder = async (channel) => {
     setResendingOrderId(selectedOrder.id)
     setNotificationMessage('')
     try {
-      await orderApi.resendSummary(selectedOrder.id)
-      setNotificationMessage('Order summary sent to your confirmed email.')
+      await orderApi.resendSummary(selectedOrder.id, channel)
+      setNotificationMessage(`Order summary sent by ${channel === 'WHATSAPP' ? 'WhatsApp' : channel === 'SMS' ? 'SMS' : 'email'}.`)
     } catch (resendError) { setError(resendError.message || 'Unable to resend the order summary.') }
     finally { setResendingOrderId(null) }
   }
@@ -848,7 +851,7 @@ function Orders({ products }) {
         <div className="order-detail-items">{(selectedOrder.items || []).map((item) => <div className="order-detail-item" key={item.id}><img src={productImage(item.product_id)} alt=""/><div><strong>{item.product_name}</strong><span>Quantity {item.quantity}{item.color ? ` · Colour ${item.color}` : ''}</span></div><b>S${Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)).toFixed(2)}</b></div>)}</div>
         <div className="order-detail-total"><span>Order total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div>
         {notificationMessage && <p className="order-notification-message" role="status">{notificationMessage}</p>}
-        <div className="order-history-actions"><button type="button" className="secondary" onClick={resendSelectedOrder} disabled={Boolean(resendingOrderId)}>{resendingOrderId ? 'Sending...' : 'Resend order email'}</button>{canRemoveSelectedOrder && <button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button>}</div>
+        <div className="order-history-actions"><button type="button" className="secondary" onClick={() => resendSelectedOrder('EMAIL')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_email}>{resendingOrderId ? 'Sending...' : 'Resend email'}</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('SMS')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend SMS</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('WHATSAPP')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend WhatsApp</button>{canRemoveSelectedOrder && <button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button>}</div>
       </article> : <div className="order-detail order-detail-empty"><Icon name="search" size={28}/><h2>No order selected</h2><p>Search by an order number from your account.</p></div>}
     </div>}
   </main>
