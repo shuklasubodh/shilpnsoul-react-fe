@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { authApi, cartApi, catalogApi, marketRequirementApi, orderApi, paymentApi } from './api'
+import { authApi, cartApi, catalogApi, marketingApi, marketRequirementApi, orderApi, paymentApi } from './api'
 import { getSessionUser, saveSession, startGuestSession } from './session'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
@@ -22,6 +22,41 @@ const hasConstrainedConnection = () => {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
   return Boolean(connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || ''))
 }
+
+const STORE_STORIES = [
+  {
+    number: '01',
+    title: 'Small-batch',
+    eyebrow: 'Few by design',
+    heading: <>Made in small numbers.<br/><em>Chosen with intention.</em></>,
+    text: 'Our Bandhej clutches, embroidered potlis, hand-painted trays and carved décor arrive in limited runs. Small batches let every finish, stitch and painted detail receive the attention it deserves.',
+    image: '/story-small-batch.png',
+  },
+  {
+    number: '02',
+    title: 'Artisan-made',
+    eyebrow: 'Hands carry memory',
+    heading: <>Crafted by hands.<br/><em>Rooted in culture.</em></>,
+    text: 'Across India, making is a living language passed through families and communities. From Bandhani and gota work to zari embroidery and carved wood, each piece holds the judgement, rhythm and memory of its artisan.',
+    image: '/story-artisan-made.png',
+  },
+  {
+    number: '03',
+    title: 'Responsibly sourced',
+    eyebrow: 'Material with meaning',
+    heading: <>Honest materials.<br/><em>Thoughtfully used.</em></>,
+    text: 'We favour tactile materials already at home in Indian craft—Bandhej, Patola and Laharia textiles, embroidery thread, brocade and wood—selected carefully and cut or shaped with respect for their character and use.',
+    image: '/story-responsibly-sourced.png',
+  },
+  {
+    number: '04',
+    title: 'Made to last',
+    eyebrow: 'Objects to live with',
+    heading: <>Not made for a season.<br/><em>Made for your story.</em></>,
+    text: 'Solid carved frames, hand-painted wooden trays, peacock serving boxes and devotional wall décor are finished with patience. They are everyday objects intended to gather memory, move between homes and remain useful.',
+    image: '/story-made-to-last.png',
+  },
+]
 
 const savedGuestCart = () => {
   try {
@@ -85,6 +120,8 @@ function App() {
   const [view, setView] = useState(initialView)
   const [cartOpen, setCartOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
+  const [faqOpen, setFaqOpen] = useState(false)
+  const [contactOpen, setContactOpen] = useState(false)
   const [user, setUser] = useState(getSessionUser)
   const isLoggedIn = Boolean(user)
   const [products, setProducts] = useState([])
@@ -99,6 +136,7 @@ function App() {
   const [toast, setToast] = useState(() => paymentReturn() === '/payment/cancel' ? 'Payment cancelled. Your bag has been kept.' : '')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [footerFeature, setFooterFeature] = useState(null)
 
   useEffect(() => removeLegacyUserCarts(), [])
 
@@ -126,12 +164,6 @@ function App() {
         setConfirmationReference(pending)
         setConfirmed(true)
         setView('checkout')
-        setCart([])
-        sessionStorage.removeItem(GUEST_CART_KEY)
-        sessionStorage.removeItem(pendingStripeOrderKey(user?.id || 'guest'))
-        if (user?.id) {
-          cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
-        }
       }
     }
     routePaymentReturn()
@@ -289,6 +321,33 @@ function App() {
     setSearchOpen(true)
     window.requestAnimationFrame(() => document.querySelector('.site-search input')?.focus())
   }
+  const toggleOurStory = () => {
+    setFooterFeature((current) => {
+      if (current !== 'story') {
+        setView('shop')
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.querySelector('.craft-callout')?.scrollIntoView({ behavior: 'smooth' })))
+      }
+      return current === 'story' ? null : 'story'
+    })
+  }
+  const toggleArtisans = () => {
+    setFooterFeature((current) => {
+      if (current !== 'artisans') {
+        setView('shop')
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.querySelector('.craft-callout')?.scrollIntoView({ behavior: 'smooth' })))
+      }
+      return current === 'artisans' ? null : 'artisans'
+    })
+  }
+  const toggleJournal = () => {
+    setFooterFeature((current) => {
+      if (current !== 'journal') {
+        setView('shop')
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.querySelector('.craft-callout')?.scrollIntoView({ behavior: 'smooth' })))
+      }
+      return current === 'journal' ? null : 'journal'
+    })
+  }
   const login = (session) => {
     saveSession(session)
     sessionStorage.removeItem(GUEST_CART_KEY)
@@ -309,14 +368,14 @@ function App() {
     setToast('You have been signed out')
   }
 
-  const completeOrder = (pending) => {
+  const completeOrder = useCallback((pending) => {
     setConfirmationReference(pending || null)
     setConfirmed(true)
     setCart([])
     sessionStorage.removeItem(GUEST_CART_KEY)
     sessionStorage.removeItem(pendingStripeOrderKey(user?.id || 'guest'))
     if (user?.id) cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
-  }
+  }, [user?.id])
 
   return (
     <div className="app-shell">
@@ -338,7 +397,7 @@ function App() {
       </header>
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
-      {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} />}
+      {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
@@ -347,24 +406,27 @@ function App() {
 
       <footer>
         <div className="footer-brand"><div className="brand light"><span>shilp</span><i>&</i><span>soul</span></div><p>Objects with a story. Made slowly,<br/>chosen thoughtfully.</p></div>
-        <div><h4>Explore</h4><a>Our story</a><a>Artisans</a><a>Journal</a></div>
-        <div><h4>Help</h4><a>Shipping & returns</a>{!isLoggedIn && <button onClick={() => go('track')}>Track an order</button>}<a>Contact us</a></div>
-        <div className="newsletter"><h4>Notes from the studio</h4><p>New collections, craft stories, and quiet inspiration.</p><label><span className="sr-only">Email address</span><input type="email" placeholder="Your email address"/><button aria-label="Subscribe"><Icon name="arrow"/></button></label></div>
+        <div><h4>Explore</h4><button type="button" onClick={toggleOurStory} aria-expanded={footerFeature === 'story'}>Our story</button><button type="button" onClick={toggleArtisans} aria-expanded={footerFeature === 'artisans'}>Artisans</button><button type="button" onClick={toggleJournal} aria-expanded={footerFeature === 'journal'}>Journal</button></div>
+        <div><h4>Help</h4><button type="button" onClick={() => setFaqOpen(true)} aria-haspopup="dialog">FAQs</button>{!isLoggedIn && <button onClick={() => go('track')}>Track an order</button>}<button type="button" onClick={() => setContactOpen(true)} aria-haspopup="dialog">Contact us</button></div>
+        <MarketingSignup />
       </footer>
 
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => isLoggedIn ? go('checkout') : (setCartOpen(false), setLoginOpen(true))} /></>}
       {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><Login close={() => { startGuestSession(); setLoginOpen(false) }} success={login} continueAsGuest={() => { startGuestSession(); setLoginOpen(false); setCheckoutMode('guest'); if (cart.length) go('checkout') }} /></>}
+      {faqOpen && <><div className="faq-scrim" onClick={() => setFaqOpen(false)}/><section className="faq-modal" role="dialog" aria-modal="true" aria-labelledby="faq-heading"><header><div><span className="eyebrow">Here to help</span><h2 id="faq-heading">Frequently asked questions</h2><p>Everything you need to know about shopping with Shilp &amp; Soul.</p></div><button type="button" className="icon-button" onClick={() => setFaqOpen(false)} aria-label="Close FAQs"><Icon name="close"/></button></header><div className="faq-list"><details open><summary>What kind of products does Shilp &amp; Soul offer?</summary><p>We curate Indian-made wall decorations, hand-painted dining pieces, devotional décor, embroidered potli bags, clutches, handbags, shirts and kurtis. The collection includes Bandhej, Patola, Laharia, gota, zari, brocade, carved wood and painted craft traditions.</p></details><details><summary>Are handmade pieces exactly identical?</summary><p>No. Small variations in colour, weave, embroidery, carving and painted detail are part of handmade production. They make each piece individual without affecting its intended use or quality.</p></details><details><summary>How much does delivery cost?</summary><p>Delivery is complimentary when your merchandise subtotal is S$150 or more. A delivery charge of S$8 applies below that amount and is shown before you place the order.</p></details><details><summary>Can I place an order without creating an account?</summary><p>Yes. Guest checkout is available when the store is live. You will need to verify your selected email, SMS or WhatsApp destination before placing the order.</p></details><details><summary>Which payment methods are accepted?</summary><p>Online checkout is securely handled by Stripe and currently supports cards and PayNow when available. Stripe may request an email address for its payment confirmation even when your store updates are sent by SMS or WhatsApp.</p></details><details><summary>How will I receive order updates?</summary><p>You can select email, SMS or WhatsApp. Registered customers use a verified contact saved to their account; guests confirm the selected destination during checkout.</p></details><details><summary>How can I track my order?</summary><p>Customers can sign in and open “My orders.” Guests can select “Track order” and enter the order number plus the email address, SMS number or WhatsApp number used at checkout.</p></details><details><summary>Can I cancel an order?</summary><p>A cancellation request can be raised while an order is pending, confirmed or processing. Requests are sent to the seller for review and are not automatically approved.</p></details><details><summary>Can I return an item?</summary><p>Eligible delivered items can be submitted for return review from your order details. The applicable return window is associated with the order, and the seller reviews each request before approval.</p></details><details><summary>What if the product I want is not listed?</summary><p>Search through the Shilp assistant. If no matching item is found, registered customers can share a product request with our buying and support team for personalised assistance.</p></details><details><summary>Why are some products available only in small quantities?</summary><p>Many pieces are sourced or produced in small batches. Stock shown on each product, including available colour quantities, reflects the current product master and may be limited.</p></details></div></section></>}
+      {contactOpen && <ContactModal close={() => setContactOpen(false)} />}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
-      {view !== 'requirements-admin' && <ShopAssistant products={products} categories={categories} user={user} />}
+      {view !== 'requirements-admin' && <ShopAssistant products={products} categories={categories} user={user} onSignIn={() => setLoginOpen(true)} />}
     </div>
   )
 }
 
-function Shop({ products, categories, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts }) {
+function Shop({ products, categories, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts, footerFeature, openFooterFeature, closeFooterFeature }) {
   const [categoryId, setCategoryId] = useState('all')
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(hasConstrainedConnection)
   const [heroSource, updateHeroSource] = useState(() => localStorage.getItem('heroImageSource') === 'banner' ? 'banner' : 'product')
+  const [activeStory, setActiveStory] = useState(null)
   const productSlides = useMemo(() => products.flatMap((product) => product.images.map((image, index) => ({
     id: `product-${product.id}-${index}`,
     image,
@@ -381,6 +443,7 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
   const heroSlides = heroSource === 'banner' ? bannerSlides : productSlides
   const setHeroSource = (source) => {
     setHeroIndex(0)
+    setActiveStory(null)
     updateHeroSource(source)
     localStorage.setItem('heroImageSource', source)
   }
@@ -392,6 +455,7 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
     return () => window.clearInterval(timer)
   }, [heroPaused, heroSlides.length])
   const heroSlide = heroSlides[heroIndex] || null
+  const displayedHero = activeStory || heroSlide
   const categoryFilteredProducts = categoryId === 'all'
     ? products
     : products.filter((product) => String(product.category_id) === categoryId)
@@ -401,11 +465,11 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
     : categoryFilteredProducts
 
   return <main>
-    {!normalizedSearch && <><section className="hero-section">
-      <div className="hero-copy"><span className="eyebrow">Handmade for the everyday</span><h1>Live with things<br/><em>that have a soul.</em></h1><p>Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.</p><button className="primary" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div>
-      <div className="hero-art"><div className="hero-image" role="img" aria-label={heroSlide?.alt || 'Handcrafted home decor'} style={heroSlide ? { backgroundImage: `url("${heroSlide.image}")` } : undefined}></div><div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div><div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div><div className="maker-note"><span>{heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{heroSlide?.label || (heroSource === 'banner' ? 'No active banners' : 'Objects made with care')}</strong><button aria-label={heroSlide ? `View ${heroSlide.label}` : 'Explore the collection'} onClick={() => heroSlide?.link ? window.location.assign(heroSlide.link) : document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
+    {!normalizedSearch && <><section className={`hero-section${activeStory ? ' story-active' : ''}`}>
+      <div className="hero-copy"><span className="eyebrow">{activeStory?.eyebrow || 'Handmade for the everyday'}</span><h1>{activeStory?.heading || <>Live with things<br/><em>that have a soul.</em></>}</h1><p>{activeStory?.text || 'Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.'}</p><button className="primary" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div>
+      <div className="hero-art"><div className="hero-image" role="img" aria-label={activeStory ? `${activeStory.title}, Shilp & Soul craft story` : heroSlide?.alt || 'Handcrafted home decor'} style={displayedHero ? { backgroundImage: `url("${displayedHero.image}")` } : undefined}></div><div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={!activeStory && heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={!activeStory && heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div>{!activeStory && <div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div>}<div className="maker-note"><span>{activeStory ? `Our story · ${activeStory.number}` : heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{activeStory?.title || heroSlide?.label || (heroSource === 'banner' ? 'No active banners' : 'Objects made with care')}</strong><button aria-label="Explore the collection" onClick={() => activeStory ? showProducts() : heroSlide?.link ? window.location.assign(heroSlide.link) : document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
     </section>
-    <section className="story-strip"><p><span>01</span> Small-batch</p><p><span>02</span> Artisan-made</p><p><span>03</span> Responsibly sourced</p><p><span>04</span> Made to last</p></section></>}
+    <section className="story-strip" aria-label="The Shilp & Soul approach">{STORE_STORIES.map((story) => <button type="button" className={activeStory?.number === story.number ? 'selected' : ''} aria-pressed={activeStory?.number === story.number} onClick={() => { setActiveStory(story); setHeroPaused(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }} key={story.number}><span>{story.number}</span> {story.title}</button>)}</section></>}
     <section className={`collection${normalizedSearch ? ' search-results' : ''}`} id="products">
       <div className="section-head"><div><span className="eyebrow">{normalizedSearch ? 'Search results' : 'Curated for you'}</span><h2>{normalizedSearch ? `${visibleProducts.length} ${visibleProducts.length === 1 ? 'piece' : 'pieces'} found` : 'Objects of quiet beauty'}</h2></div>{!normalizedSearch && <button>View all pieces <Icon name="arrow" size={17}/></button>}</div>
       <div className="filters" aria-label="Product categories"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => setCategoryId('all')}>All objects</button>{categories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => setCategoryId(String(category.id))} key={category.id}>{category.name}</button>)}</div>
@@ -414,7 +478,7 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
       {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">{normalizedSearch ? `No products match “${searchQuery.trim()}”.` : 'No pieces are available in this category yet.'}</div>}
       <div className="product-grid">{visibleProducts.map((product) => <ProductCard product={product} cartEntries={cart.filter((item) => item.id === product.id)} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} key={product.id} />)}</div>
     </section>
-    <section className="craft-callout"><div className="craft-image"></div><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link">Meet our makers <Icon name="arrow" size={18}/></button></div></section>
+    <section className={`craft-callout${footerFeature ? ` showing-${footerFeature}` : ''}`}>{footerFeature === 'story' ? <><div className="our-story-image"></div><div><span className="eyebrow">Our story</span><h2>A small window into India’s<br/><em>living craft traditions.</em></h2><p>Shilp &amp; Soul shares India’s rich cultural imagination through objects made to be lived with. Our collection moves from Bandhej, Patola and Laharia clutches to gota, zari and thread-embroidered potli bags, each carrying the colour and rhythm of regional textile traditions. Hand-painted trays, peacock serving boxes and carved wall frames bring the warmth of Indian woodcraft to the table and home. Radha-Krishna décor and small ceremonial asans reflect the quiet place of devotion in everyday life, while expressive shirts and kurtis carry craft into the wardrobe. Every piece connects contemporary living with skills, symbols and stories shaped across generations.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'artisans' ? <><div className="artisans-image"></div><div><span className="eyebrow">Our artisans</span><h2>Carved by hand.<br/><em>Alive with meaning.</em></h2><p>Behind our wall decorations are artisans who understand wood as both material and memory. Floral round frames are patiently carved to create depth through light and shadow; rectangular and triangular hanging sets are balanced, finished and assembled by hand. Radha-Krishna pieces bring devotional imagery into the home, where art and everyday worship have long lived together. The same eye for proportion and painted detail shapes our peacock serving boxes and wooden trays. Tool marks, subtle variations and the warmth of the grain are not imperfections—they are the maker’s presence, giving every Shilp &amp; Soul piece its individual character.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'journal' ? <><div className="journal-image"></div><div className="journal-panel"><span className="eyebrow">The collection journal</span><h2>Objects, materials<br/>and their stories.</h2><div className="journal-product-list">{products.map((product) => { const description = product.product_description?.catalogue_description || product.description || product.craft || 'A thoughtfully selected piece shaped by Indian craft traditions.'; return <article key={product.id}><span>{product.sku || product.product_code || 'Shilp & Soul'}</span><h3>{product.name}</h3><p>{description}</p></article> })}{products.length === 0 && <p className="journal-empty">Our product stories are being prepared.</p>}<button className="text-link journal-explore" onClick={closeFooterFeature}>Explore our collection <Icon name="arrow" size={18}/></button></div></div></> : footerFeature === 'makers' ? <><div className="makers-image"></div><div><span className="eyebrow">Meet our makers</span><h2>Young perspectives.<br/><em>India at heart.</em></h2><p>Our makers bring a contemporary eye to the visual languages they grew up around. Their taste is shaped by the geometry of Patola, the movement of Laharia, the dotted rhythm of Bandhej and the glow of gota and zari. They pair embroidered potlis and clutches with carved wall frames, painted trays and devotional motifs—not as pieces frozen in the past, but as living expressions of Indian culture. Through colour, texture and thoughtful composition, they imagine how inherited craft can belong naturally in today’s wardrobe and home. Each choice is an invitation to discover heritage with curiosity, confidence and personal style.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : <><div className="craft-image"></div><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link" onClick={() => openFooterFeature('makers')}>Meet our makers <Icon name="arrow" size={18}/></button></div></>}</section>
   </main>
 }
 
@@ -531,10 +595,10 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   const [redirecting, setRedirecting] = useState(false)
   const [checkoutEmail, setCheckoutEmail] = useState(isLoggedIn && mode === 'customer' ? user?.email || '' : '')
   const [checkoutPhone, setCheckoutPhone] = useState(isLoggedIn && mode === 'customer' ? user?.phone || '' : '')
-  const [notificationChannel, setNotificationChannel] = useState('EMAIL')
+  const [checkoutWhatsapp, setCheckoutWhatsapp] = useState(isLoggedIn && mode === 'customer' ? user?.whatsapp_number || '' : '')
+  const [notificationChannel, setNotificationChannel] = useState(isLoggedIn ? user?.preferred_notification_channel || 'EMAIL' : 'EMAIL')
   const [verificationId, setVerificationId] = useState(null)
   const [verificationToken, setVerificationToken] = useState('')
-  const [verifiedChannel, setVerifiedChannel] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [verificationBusy, setVerificationBusy] = useState(false)
   const [verificationMessage, setVerificationMessage] = useState('')
@@ -544,17 +608,17 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   const isPhoneNotification = notificationChannel === 'WHATSAPP' || notificationChannel === 'SMS'
   const notificationChannelName = notificationChannel === 'WHATSAPP' ? 'WhatsApp' : notificationChannel === 'SMS' ? 'SMS' : 'email'
   const notificationDestinationName = isPhoneNotification ? 'phone number' : 'email'
-  const normalizedCheckoutPhone = toE164(checkoutPhone)
+  const normalizedCheckoutWhatsapp = toE164(checkoutWhatsapp)
   const smsNumberIsE164 = /^\+[1-9]\d{7,14}$/.test(checkoutPhone.trim())
-  const notificationDestination = notificationChannel === 'SMS' ? checkoutPhone.trim() : notificationChannel === 'WHATSAPP' ? normalizedCheckoutPhone : checkoutEmail.trim().toLowerCase()
-  const accountNotificationConfirmed = Boolean(isLoggedIn && (user?.email_verified_at || user?.phone_verified_at))
+  const notificationDestination = notificationChannel === 'SMS' ? checkoutPhone.trim() : notificationChannel === 'WHATSAPP' ? normalizedCheckoutWhatsapp : checkoutEmail.trim().toLowerCase()
+  const accountNotificationConfirmed = Boolean(isLoggedIn && (notificationChannel === 'EMAIL' ? user?.email_verified_at : notificationChannel === 'SMS' ? user?.phone_verified_at : user?.whatsapp_verified_at))
+  const emailLocksGuestChannels = Boolean(!isLoggedIn && checkoutEmail.trim())
   const notificationConfirmed = accountNotificationConfirmed || Boolean(verificationToken)
 
   const resetVerification = (clearConfirmed = true) => {
     setVerificationId(null)
     if (clearConfirmed) {
       setVerificationToken('')
-      setVerifiedChannel('')
     }
     setVerificationCode('')
     setVerificationMessage('')
@@ -562,11 +626,13 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
 
   const changeCheckoutEmail = (event) => {
     setCheckoutEmail(event.target.value)
-    resetVerification(verifiedChannel !== 'PHONE')
+    if (!isLoggedIn && event.target.value.trim()) setNotificationChannel('EMAIL')
+    resetVerification()
   }
 
-  const changeCheckoutPhone = (event) => { setCheckoutPhone(event.target.value); setPhoneFormatError(''); resetVerification(verifiedChannel !== 'EMAIL') }
-  const chooseNotificationChannel = (channel) => { setNotificationChannel(channel); setPhoneFormatError(''); resetVerification(false); setPaymentError('') }
+  const changeCheckoutPhone = (event) => { setCheckoutPhone(event.target.value); setPhoneFormatError(''); resetVerification() }
+  const changeCheckoutWhatsapp = (event) => { setCheckoutWhatsapp(event.target.value); setPhoneFormatError(''); resetVerification() }
+  const chooseNotificationChannel = (channel) => { setNotificationChannel(channel); setPhoneFormatError(''); resetVerification(); setPaymentError('') }
 
   const requestCheckoutCode = async () => {
     setVerificationBusy(true)
@@ -594,7 +660,6 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     try {
       const result = await authApi.verifyCode(verificationId, verificationCode, isLoggedIn)
       setVerificationToken(result.verification_token)
-      setVerifiedChannel(notificationChannel === 'EMAIL' ? 'EMAIL' : 'PHONE')
       setVerificationMessage(`${notificationDestinationName === 'email' ? 'Email' : 'Phone number'} confirmed for this order.`)
     } catch (error) { setPaymentError(error.message) }
     finally { setVerificationBusy(false) }
@@ -635,7 +700,7 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
       if (!pending?.id) {
         const details = {
           shipping_name: data.get('name'), shipping_phone: submittedPhoneE164, shipping_address: data.get('shippingAddress'),
-          contact_email: submittedEmail, contact_phone: submittedPhoneE164, payment_method: paymentMethod === 'stripe' ? 'STRIPE' : 'CASH',
+          contact_email: submittedEmail, contact_phone: submittedPhoneE164, contact_whatsapp: normalizedCheckoutWhatsapp, payment_method: paymentMethod === 'stripe' ? 'STRIPE' : 'CASH',
           notification_channel: notificationChannel, notification_destination: notificationDestination, notification_verification_token: verificationToken,
         }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
@@ -674,18 +739,23 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
         ? paymentApi.orderResult(pending.id, pending.accessToken)
         : Promise.reject(new Error('Order reference is unavailable. Please use order tracking to find your order.'))
     resultRequest
-      .then(setConfirmedOrder)
+      .then((result) => {
+        setConfirmedOrder(result)
+        if (result.payment_status === 'PAID') onConfirm(pending)
+        else setConfirmationError('Payment confirmation is still pending. Refresh this page in a moment before leaving.')
+      })
       .catch((error) => setConfirmationError(error.message || 'Order details could not be loaded.'))
-  }, [confirmed, confirmationReference, user?.id])
+  }, [confirmed, confirmationReference, onConfirm, user?.id])
 
   if (confirmed) {
     const channel = confirmedOrder?.notification_channel === 'WHATSAPP' ? 'WhatsApp' : confirmedOrder?.notification_channel === 'SMS' ? 'SMS' : 'email'
-    return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">Order confirmed</span><h1>Thank you for choosing<br/><em>handmade.</em></h1><p>Your order has been received. We’ll send the details and delivery updates by {channel}.</p><div className="order-number"><span>Order number</span><strong>{confirmedOrder?.order_number || 'Loading…'}</strong><button disabled={!confirmedOrder?.order_number} onClick={() => navigator.clipboard.writeText(confirmedOrder.order_number)}>Copy</button></div>{confirmationError && <p className="payment-error" role="alert">{confirmationError}</p>}<div className="confirmation-actions"><button className="primary" onClick={() => go('shop')}>Continue shopping</button><button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button></div></main>
+    const paid = confirmedOrder?.payment_status === 'PAID'
+    return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">{paid?'Order confirmed':'Confirming payment'}</span><h1>{paid?'Thank you for choosing':'Please wait while we confirm'}<br/><em>{paid?'handmade.':'your payment.'}</em></h1><p>{paid?`Your order has been received. We’ll send the details and delivery updates by ${channel}.`:'Your bag will be kept until Stripe confirms successful payment.'}</p><div className="order-number"><span>Order number</span><strong>{confirmedOrder?.order_number || 'Loading…'}</strong><button disabled={!confirmedOrder?.order_number} onClick={() => navigator.clipboard.writeText(confirmedOrder.order_number)}>Copy</button></div>{confirmationError && <p className="payment-error" role="alert">{confirmationError}</p>}<div className="confirmation-actions"><button className="primary" onClick={() => paid ? go('shop') : window.location.reload()}>{paid?'Continue shopping':'Check again'}</button>{paid&&<button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button>}</div></main>
   }
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
     <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn || !LIVE_MODE} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{!LIVE_MODE ? 'Available when the store goes live' : isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
-      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address{notificationChannel === 'EMAIL' ? ' *' : ' (optional)'}<input required={notificationChannel === 'EMAIL'} name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>Phone number{isPhoneNotification ? ' *' : ' (optional)'}<input required={isPhoneNotification} name="phone" type="tel" value={checkoutPhone} onChange={changeCheckoutPhone} placeholder="+6591234567" title="Use international E.164 format, for example +6591234567" aria-invalid={notificationChannel === 'SMS' && checkoutPhone.length > 0 && !smsNumberIsE164}/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
-        <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className={notificationChannel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'EMAIL'} onChange={() => chooseNotificationChannel('EMAIL')}/> Email</label><label className={notificationChannel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'WHATSAPP'} onChange={() => chooseNotificationChannel('WHATSAPP')}/> WhatsApp</label><label className={notificationChannel === 'SMS' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'SMS'} onChange={() => chooseNotificationChannel('SMS')}/> SMS</label></div>{accountNotificationConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your account identity is already verified.</p> : verificationToken ? <p className="verification-success"><Icon name="check" size={15}/> Checkout contact confirmed.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy || !notificationDestination}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm {notificationChannelName}</button></div>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
+      <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address{notificationChannel === 'EMAIL' ? ' *' : ' (optional)'}<input required={notificationChannel === 'EMAIL'} name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>SMS phone{notificationChannel === 'SMS' ? ' *' : ' (optional)'}<input required={notificationChannel === 'SMS'} name="phone" type="tel" value={checkoutPhone} onChange={changeCheckoutPhone} placeholder="+6591234567" title="Use international E.164 format, for example +6591234567" aria-invalid={notificationChannel === 'SMS' && checkoutPhone.length > 0 && !smsNumberIsE164}/></label><label>WhatsApp{notificationChannel === 'WHATSAPP' ? ' *' : ' (optional)'}<input required={notificationChannel === 'WHATSAPP'} name="whatsapp" type="tel" value={checkoutWhatsapp} onChange={changeCheckoutWhatsapp} placeholder="+6591234567"/></label><label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
+        <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className={notificationChannel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'EMAIL'} onChange={() => chooseNotificationChannel('EMAIL')}/> Email</label><label className={notificationChannel === 'WHATSAPP' ? 'selected' : ''} aria-disabled={emailLocksGuestChannels}><input type="radio" name="notificationChannel" checked={notificationChannel === 'WHATSAPP'} disabled={emailLocksGuestChannels} onChange={() => chooseNotificationChannel('WHATSAPP')}/> WhatsApp</label><label className={notificationChannel === 'SMS' ? 'selected' : ''} aria-disabled={emailLocksGuestChannels}><input type="radio" name="notificationChannel" checked={notificationChannel === 'SMS'} disabled={emailLocksGuestChannels} onChange={() => chooseNotificationChannel('SMS')}/> SMS</label></div>{emailLocksGuestChannels&&<p className="verification-note">Email is used when it is supplied during guest checkout.</p>}{accountNotificationConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your selected account contact is already verified.</p> : verificationToken ? <p className="verification-success"><Icon name="check" size={15}/> Checkout contact confirmed.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy || !notificationDestination}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm {notificationChannelName}</button></div>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
         <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">Choose how to pay</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className={paymentMethod === 'stripe' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')}/><span><b>Credit/debit card or PayNow</b><small>Secure payment powered by Stripe</small></span><strong>Stripe</strong></label><label className={paymentMethod === 'paynow' ? 'selected' : ''}><input type="radio" name="paymentMethod" checked={paymentMethod === 'paynow'} onChange={() => setPaymentMethod('paynow')}/><span><b>PayLah QR code</b><small>Scan using your PayLah app</small></span></label></div>{paymentMethod === 'paynow' && <><p className="payment-intro">Open the payment window to scan the merchant QR code.</p><button className="secondary payment-open" type="button" onClick={() => setPaymentOpen(true)}>{paymentConfirmed ? 'View PayLah QR again' : 'Open PayLah payment'} <Icon name="arrow" size={17}/></button>{paymentConfirmed && <p className="payment-status"><Icon name="check" size={15}/> Payment marked as completed</p>}</>}</section>
         <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label>{paymentError && <p className="payment-error" role="alert">{paymentError}</p>}<button className="primary full" disabled={!cart.length || !notificationConfirmed || redirecting || (paymentMethod === 'paynow' && !paymentConfirmed)}>{redirecting ? 'Opening secure checkout…' : paymentMethod === 'stripe' ? `Pay S$${orderTotal.toFixed(2)} with Stripe` : `Confirm payment & place order · S$${orderTotal.toFixed(2)}`} {!redirecting && <Icon name="arrow" size={18}/>}</button><p className="secure">{paymentMethod === 'stripe' ? 'You’ll continue to Stripe’s secure checkout. Card details never touch our servers.' : 'PayNow payment is confirmed manually.'}</p></form>
       {paymentOpen && <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="paynow-modal-title" onClick={() => setPaymentOpen(false)}><div className="payment-modal-panel" onClick={(event) => event.stopPropagation()}><button className="icon-button payment-modal-close" type="button" onClick={() => setPaymentOpen(false)} aria-label="Close PayLah payment"><Icon name="close" /></button><span className="eyebrow">Manual QR payment</span><h2 id="paynow-modal-title">Pay with PayLah</h2><div className="paynow-layout"><img src="/paynow-qr.jpeg" alt="PayLah QR code for Shilp and Soul payment"/><div><h3>Scan to pay S${orderTotal.toFixed(2)}</h3><ol><li>Open your PayLah app and select Scan & Pay.</li><li>Verify the merchant name displayed in the app.</li><li>Enter exactly <strong>S${orderTotal.toFixed(2)}</strong> and complete payment.</li></ol><p>Never proceed if the app shows an unexpected recipient.</p></div></div><label className="checkbox payment-confirmation"><input checked={paymentConfirmed} type="checkbox" onChange={(event) => setPaymentConfirmed(event.target.checked)}/> I have paid S${orderTotal.toFixed(2)} using PayLah</label><button className="primary full" type="button" disabled={!paymentConfirmed} onClick={() => setPaymentOpen(false)}>Done <Icon name="check" size={17}/></button></div></div>}
@@ -701,21 +771,43 @@ function Login({ close, success, continueAsGuest }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [registrationEmail, setRegistrationEmail] = useState('')
+  const [registrationCountryCode] = useState('+65')
   const [registrationPhone, setRegistrationPhone] = useState('')
-  const [verificationId, setVerificationId] = useState(null)
-  const [verificationCode, setVerificationCode] = useState('')
-  const [verificationToken, setVerificationToken] = useState('')
+  const [registrationWhatsapp, setRegistrationWhatsapp] = useState('')
+  const [registrationChannel, setRegistrationChannel] = useState('EMAIL')
+  const [verificationIds, setVerificationIds] = useState({})
+  const [verificationCodes, setVerificationCodes] = useState({})
+  const [verificationTokens, setVerificationTokens] = useState({})
   const [verificationMessage, setVerificationMessage] = useState('')
+  const registrationDestinations = { EMAIL: registrationEmail.trim().toLowerCase(), SMS: toE164(registrationPhone, registrationCountryCode.replace(/\D/g, '')), WHATSAPP: toE164(registrationWhatsapp) }
+  const registrationChannelName = (channel) => channel === 'WHATSAPP' ? 'WhatsApp' : channel === 'SMS' ? 'SMS' : 'email'
 
-  const requestRegistrationCode = async () => {
+  const resetRegistrationVerification = () => {
+    setVerificationIds({});setVerificationCodes({});setVerificationTokens({});setVerificationMessage('')
+  }
+
+  const checkRegistrationPhone = async () => {
+    if(!registrationPhone.trim())return false
+    try {
+      const result=await authApi.phoneAvailability(registrationCountryCode,registrationPhone)
+      const message=result.available?'':'An account with this phone number already exists for the selected country.'
+      setError(message)
+      return result.available
+    } catch(checkError) {
+      setError(checkError.message)
+      return false
+    }
+  }
+
+  const requestRegistrationCode = async (channel) => {
     setSubmitting(true);setError('');setVerificationMessage('')
-    try{const result=await authApi.requestVerification(registrationPhone.trim(),'REGISTRATION','WHATSAPP');setVerificationId(result.verification_id);setVerificationMessage('A six-digit code was sent to your WhatsApp number.')}
+    try{if(channel==='SMS'&&!await checkRegistrationPhone())throw new Error('Use a phone number that is not already registered.');const result=await authApi.requestVerification(registrationDestinations[channel],'REGISTRATION',channel);setVerificationIds((current)=>({...current,[channel]:result.verification_id}));setVerificationMessage(`A six-digit code was sent by ${registrationChannelName(channel)}.`)}
     catch(requestError){setError(requestError.message)}finally{setSubmitting(false)}
   }
 
-  const confirmRegistrationCode = async () => {
+  const confirmRegistrationCode = async (channel) => {
     setSubmitting(true);setError('')
-    try{const result=await authApi.verifyCode(verificationId,verificationCode,false);setVerificationToken(result.verification_token);setVerificationMessage('WhatsApp number verified. You can now create your account.')}
+    try{const result=await authApi.verifyCode(verificationIds[channel],verificationCodes[channel],false);setVerificationTokens((current)=>({...current,[channel]:result.verification_token}));setVerificationMessage(`${registrationChannelName(channel)} verified.`)}
     catch(verifyError){setError(verifyError.message)}finally{setSubmitting(false)}
   }
 
@@ -727,14 +819,16 @@ function Login({ close, success, continueAsGuest }) {
     try {
       startGuestSession()
       if(registering){
-        if(!verificationToken)throw new Error('Verify your WhatsApp number before creating the account.')
-        success(await authApi.register({first_name:data.get('firstName'),last_name:data.get('lastName'),email:registrationEmail.trim().toLowerCase(),phone:registrationPhone.trim(),password:data.get('password'),verification_token:verificationToken}))
+        if(['EMAIL','SMS','WHATSAPP'].some((channel)=>!verificationTokens[channel]))throw new Error('Verify email, SMS, and WhatsApp before creating the account.')
+        if(!await checkRegistrationPhone())throw new Error('Use a phone number that is not already registered.')
+        success(await authApi.register({first_name:data.get('firstName'),last_name:data.get('lastName'),email:registrationEmail.trim().toLowerCase(),country_code:registrationCountryCode,phone:registrationPhone.trim(),whatsapp_number:registrationWhatsapp.trim(),password:data.get('password'),preferred_notification_channel:registrationChannel,verification_tokens:verificationTokens}))
       }else success(await authApi.login(data.get('email'), data.get('password')))
     }
     catch (loginError) { setError(loginError.message) }
     finally { setSubmitting(false) }
   }
-  return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>{registering?'Create an account with a verified WhatsApp number for simpler checkout.':'Sign in to revisit your orders and saved details.'}</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>{registering?'Create your account':'Welcome back'}</h2><p>{registering?'Verify your WhatsApp number before your account is created.':'Enter your details to continue.'}</p><form onSubmit={submit}>{registering&&<div className="registration-names"><label>First name<input required name="firstName" autoComplete="given-name"/></label><label>Last name<input required name="lastName" autoComplete="family-name"/></label></div>}<label>Email address<input required name="email" type="email" autoComplete="email" value={registering?registrationEmail:undefined} onChange={registering?(event)=>setRegistrationEmail(event.target.value):undefined} placeholder="you@example.com"/></label>{registering&&<><label>WhatsApp number<input required name="phone" type="tel" autoComplete="tel" value={registrationPhone} onChange={(event)=>{setRegistrationPhone(event.target.value);setVerificationId(null);setVerificationToken('');setVerificationCode('');setVerificationMessage('')}} placeholder="+65 0000 0000"/></label><div className="registration-verification"><button className="secondary" type="button" disabled={submitting||!registrationPhone} onClick={requestRegistrationCode}>{verificationId?'Resend code':'Send WhatsApp code'}</button>{verificationId&&!verificationToken&&<><input aria-label="Six-digit verification code" inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event)=>setVerificationCode(event.target.value.replace(/\D/g,'').slice(0,6))}/><button className="secondary" type="button" disabled={submitting||verificationCode.length!==6} onClick={confirmRegistrationCode}>Verify</button></>}</div>{verificationMessage&&<p className="verification-note" role="status">{verificationMessage}</p>}</>}<label><span>Password {!registering&&<button type="button">Forgot password?</button>}</span><input required name="password" type="password" minLength={registering?12:undefined} autoComplete={registering?'new-password':'current-password'} placeholder="••••••••••••"/></label>{error&&<p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting||(registering&&!verificationToken)}>{submitting?'Please wait…':registering?'Create account':'Sign in'} {!submitting&&<Icon name="arrow" size={18}/>}</button></form>{LIVE_MODE?<><div className="or"><span>or</span></div><p className="signup">{registering?'Already have an account?':'New to Shilp & Soul?'} <button type="button" onClick={()=>{setRegistering(!registering);setError('')}}>{registering?'Sign in':'Create an account'}</button></p><button className="guest-link" onClick={continueAsGuest}>Continue as guest</button></>:<p className="development-notice">New accounts and guest checkout will be available when the store goes live.</p>}</div></section>
+  const allRegistrationChannelsVerified = ['EMAIL','SMS','WHATSAPP'].every((channel)=>verificationTokens[channel])
+  return <section className="login-modal"><div className="login-visual"><button className="brand light"><span>shilp</span><i>&</i><span>soul</span></button><div><span className="eyebrow">Welcome home</span><blockquote>“Beautiful things are<br/>made to be lived with.”</blockquote><p>{registering?'Create an account with verified email, SMS, and WhatsApp contacts.':'Sign in to revisit your orders and saved details.'}</p></div><small>Crafted with care · Singapore</small></div><div className="login-form"><button className="icon-button login-close" onClick={close} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer account</span><h2>{registering?'Create your account':'Welcome back'}</h2><p>{registering?'Verify all three contacts, then choose one default notification channel.':'Enter your details to continue.'}</p><form onSubmit={submit}>{registering&&<div className="registration-names"><label>First name<input required name="firstName" autoComplete="given-name"/></label><label>Last name<input required name="lastName" autoComplete="family-name"/></label></div>}<label>Email address<input required name="email" type="email" autoComplete="email" value={registering?registrationEmail:undefined} onChange={registering?(event)=>{setRegistrationEmail(event.target.value);resetRegistrationVerification()}:undefined} placeholder="you@example.com"/></label>{registering&&<><label>SMS phone<input required name="phone" type="tel" autoComplete="tel" value={registrationPhone} onChange={(event)=>{setRegistrationPhone(event.target.value);resetRegistrationVerification()}} placeholder="+65 0000 0000"/></label><label>WhatsApp number<input required name="whatsapp" type="tel" value={registrationWhatsapp} onChange={(event)=>{setRegistrationWhatsapp(event.target.value);resetRegistrationVerification()}} placeholder="+65 0000 0000"/></label><div className="registration-verification-list">{['EMAIL','SMS','WHATSAPP'].map((channel)=><div className="registration-verification" key={channel}><button className="secondary" type="button" disabled={submitting||!registrationDestinations[channel]||verificationTokens[channel]} onClick={()=>requestRegistrationCode(channel)}>{verificationTokens[channel]?`${registrationChannelName(channel)} verified`:verificationIds[channel]?'Resend code':`Send ${registrationChannelName(channel)} code`}</button>{verificationIds[channel]&&!verificationTokens[channel]&&<><input aria-label={`${channel} six-digit verification code`} inputMode="numeric" maxLength="6" value={verificationCodes[channel]||''} onChange={(event)=>setVerificationCodes((current)=>({...current,[channel]:event.target.value.replace(/\D/g,'').slice(0,6)}))}/><button className="secondary" type="button" disabled={submitting||(verificationCodes[channel]||'').length!==6} onClick={()=>confirmRegistrationCode(channel)}>Verify</button></>}</div>)}</div><p>Default notification channel</p><div className="notification-channels" role="radiogroup" aria-label="Default notification channel">{['EMAIL','SMS','WHATSAPP'].map((channel)=><label className={registrationChannel===channel?'selected':''} key={channel}><input type="radio" checked={registrationChannel===channel} onChange={()=>setRegistrationChannel(channel)}/>{channel==='WHATSAPP'?'WhatsApp':channel}</label>)}</div>{verificationMessage&&<p className="verification-note" role="status">{verificationMessage}</p>}</>}<label><span>Password {!registering&&<button type="button">Forgot password?</button>}</span><input required name="password" type="password" minLength={registering?12:undefined} autoComplete={registering?'new-password':'current-password'} placeholder="••••••••••••"/></label>{error&&<p className="login-error" role="alert">{error}</p>}<button className="primary full" disabled={submitting||(registering&&!allRegistrationChannelsVerified)}>{submitting?'Please wait…':registering?'Create account':'Sign in'} {!submitting&&<Icon name="arrow" size={18}/>}</button></form>{LIVE_MODE?<><div className="or"><span>or</span></div><p className="signup">{registering?'Already have an account?':'New to Shilp & Soul?'} <button type="button" onClick={()=>{setRegistering(!registering);setError('')}}>{registering?'Sign in':'Create an account'}</button></p><button className="guest-link" onClick={continueAsGuest}>Continue as guest</button></>:<p className="development-notice">New accounts and guest checkout will be available when the store goes live.</p>}</div></section>
 }
 
 function TrackOrder() {
@@ -767,11 +861,22 @@ function TrackOrder() {
     try{const delivery=await orderApi.guestNotificationStatus(result.id,result.order_access_token);const event=delivery.provider_event?` (${delivery.provider_event.replaceAll('_',' ')})`:'';setNotificationMessage(`Notification status: ${delivery.status.toLowerCase()}${event}.${delivery.error?` ${delivery.error}`:''}`)}
     catch(statusError){setError(statusError.message||'Unable to check notification delivery.')}finally{setLoading(false)}
   }
+  const requestGuestAction = async (actionType, item) => {
+    const reason = window.prompt(`Reason for this ${actionType.toLowerCase()} request?`)
+    if (reason === null) return
+    setLoading(true);setError('');setNotificationMessage('')
+    try {
+      await orderApi.requestGuestAction(result.id, result.order_access_token, { action_type: actionType, order_item_id: item?.id, quantity: item?.quantity, reason })
+      setResult((current) => ({ ...current, status: actionType === 'RETURN' ? 'RETURN_REVIEW' : 'CANCEL_REVIEW' }))
+      setNotificationMessage(`${actionType === 'RETURN' ? 'Return' : 'Cancellation'} request sent to the seller for review.`)
+    } catch (actionError) { setError(actionError.message || 'Unable to submit the request.') }
+    finally { setLoading(false) }
+  }
   const status = String(result?.status || '').toUpperCase()
   const progress = { PENDING: 15, CONFIRMED: 30, PROCESSING: 50, SHIPPED: 75, DELIVERED: 100 }[status] || 0
   const channelName = channel === 'WHATSAPP' ? 'WhatsApp' : channel === 'SMS' ? 'SMS' : 'Email'
   const resultChannelName = result?.notification_channel === 'WHATSAPP' ? 'WhatsApp' : result?.notification_channel === 'SMS' ? 'SMS' : 'email'
-  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Use any contact method captured during guest checkout.</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><div className="notification-channels" role="radiogroup" aria-label="Tracking contact method"><label className={channel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'EMAIL'} onChange={() => setChannel('EMAIL')}/> Email</label><label className={channel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'WHATSAPP'} onChange={() => setChannel('WHATSAPP')}/> WhatsApp</label><label className={channel === 'SMS' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'SMS'} onChange={() => setChannel('SMS')}/> SMS</label></div><label>{channelName} {channel === 'EMAIL' ? 'address' : 'number'}<input required name="destination" type={channel === 'EMAIL' ? 'email' : 'tel'} placeholder={channel === 'EMAIL' ? 'you@example.com' : '+6591234567'} autoComplete={channel === 'EMAIL' ? 'email' : 'tel'}/></label><button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p><div className="tracking-resend-actions"><button className="secondary" type="button" onClick={resend} disabled={loading}>Resend by {resultChannelName}</button><button className="secondary" type="button" onClick={checkDelivery} disabled={loading}>Check delivery status</button></div>{notificationMessage&&<p className="verification-success" role="status">{notificationMessage}</p>}</div>}</div></main>
+  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Use any contact method captured during guest checkout.</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><div className="notification-channels" role="radiogroup" aria-label="Tracking contact method"><label className={channel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'EMAIL'} onChange={() => setChannel('EMAIL')}/> Email</label><label className={channel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'WHATSAPP'} onChange={() => setChannel('WHATSAPP')}/> WhatsApp</label><label className={channel === 'SMS' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'SMS'} onChange={() => setChannel('SMS')}/> SMS</label></div><label>{channelName} {channel === 'EMAIL' ? 'address' : 'number'}<input required name="destination" type={channel === 'EMAIL' ? 'email' : 'tel'} placeholder={channel === 'EMAIL' ? 'you@example.com' : '+6591234567'} autoComplete={channel === 'EMAIL' ? 'email' : 'tel'}/></label><button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p><div className="tracking-resend-actions"><button className="secondary" type="button" onClick={resend} disabled={loading}>Resend by {resultChannelName}</button><button className="secondary" type="button" onClick={checkDelivery} disabled={loading}>Check delivery status</button>{['PENDING','CONFIRMED','PROCESSING'].includes(status)&&<button className="secondary" type="button" onClick={()=>requestGuestAction('CANCEL')} disabled={loading}>Request cancellation</button>}{status==='DELIVERED'&&(result.items||[]).map((item)=><button className="secondary" type="button" key={`return-${item.id}`} onClick={()=>requestGuestAction('RETURN',item)} disabled={loading}>Return {item.product_name}</button>)}</div>{notificationMessage&&<p className="verification-success" role="status">{notificationMessage}</p>}</div>}</div></main>
 }
 
 function Orders({ products }) {
@@ -836,6 +941,17 @@ function Orders({ products }) {
     } catch (resendError) { setError(resendError.message || 'Unable to resend the order summary.') }
     finally { setResendingOrderId(null) }
   }
+  const requestSelectedAction = async (actionType, item) => {
+    const reason = window.prompt(`Reason for this ${actionType.toLowerCase()} request?`)
+    if (reason === null) return
+    setError('');setNotificationMessage('')
+    try {
+      await orderApi.requestAction(selectedOrder.id, { action_type: actionType, order_item_id: item?.id, quantity: item?.quantity, reason })
+      const status = actionType === 'RETURN' ? 'RETURN_REVIEW' : 'CANCEL_REVIEW'
+      setOrders((current) => current.map((order) => String(order.id) === String(selectedOrder.id) ? { ...order, status } : order))
+      setNotificationMessage(`${actionType === 'RETURN' ? 'Return' : 'Cancellation'} request sent to the seller for review.`)
+    } catch (actionError) { setError(actionError.message || 'Unable to submit the request.') }
+  }
   return <main className="orders-page"><span className="eyebrow">Your collection</span><h1>My orders</h1><p>Keep track of the beautiful things you’ve chosen.</p>
     {loading && <div className="catalog-status" role="status">Loading your orders…</div>}
     {error && <div className="catalog-status error" role="alert">{error}</div>}
@@ -853,10 +969,10 @@ function Orders({ products }) {
       {selectedOrder ? <article className="order-detail" aria-live="polite">
         <div className="order-detail-head"><div><span className="eyebrow">Order details</span><h2>{selectedOrder.order_number}</h2><p>Placed {new Date(selectedOrder.created_at).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' })}</p></div><strong className={`order-status ${String(selectedOrder.status).toLowerCase()}`}>{selectedOrder.status}</strong></div>
         <div className="order-detail-meta"><div><span>Payment</span><strong className={`order-payment ${String(selectedOrder.payment_status).toLowerCase()}`}>{selectedOrder.payment_status}</strong></div><div><span>Items</span><strong>{(selectedOrder.items || []).reduce((sum, item) => sum + Number(item.quantity), 0)}</strong></div><div><span>Total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div></div>
-        <div className="order-detail-items">{(selectedOrder.items || []).map((item) => <div className="order-detail-item" key={item.id}><img src={productImage(item.product_id)} alt=""/><div><strong>{item.product_name}</strong><span>Quantity {item.quantity}{item.color ? ` · Colour ${item.color}` : ''}</span></div><b>S${Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)).toFixed(2)}</b></div>)}</div>
+        <div className="order-detail-items">{(selectedOrder.items || []).map((item) => <div className="order-detail-item" key={item.id}><img src={productImage(item.product_id)} alt=""/><div><strong>{item.product_name}</strong><span>Quantity {item.quantity}{item.color ? ` · Colour ${item.color}` : ''}</span>{selectedOrder.status==='DELIVERED'&&<button className="secondary" type="button" onClick={()=>requestSelectedAction('RETURN',item)}>Return this item</button>}</div><b>S${Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)).toFixed(2)}</b></div>)}</div>
         <div className="order-detail-total"><span>Order total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div>
         {notificationMessage && <p className="order-notification-message" role="status">{notificationMessage}</p>}
-        <div className="order-history-actions"><button type="button" className="secondary" onClick={() => resendSelectedOrder('EMAIL')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_email}>{resendingOrderId ? 'Sending...' : 'Resend email'}</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('SMS')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend SMS</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('WHATSAPP')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend WhatsApp</button>{canRemoveSelectedOrder && <button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button>}</div>
+        <div className="order-history-actions"><button type="button" className="secondary" onClick={() => resendSelectedOrder('EMAIL')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_email}>{resendingOrderId ? 'Sending...' : 'Resend email'}</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('SMS')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend SMS</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('WHATSAPP')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend WhatsApp</button>{['PENDING','CONFIRMED','PROCESSING'].includes(selectedOrder.status)&&<button type="button" className="secondary" onClick={()=>requestSelectedAction('CANCEL')}>Request cancellation</button>}{canRemoveSelectedOrder && <button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button>}</div>
       </article> : <div className="order-detail order-detail-empty"><Icon name="search" size={28}/><h2>No order selected</h2><p>Search by an order number from your account.</p></div>}
     </div>}
   </main>
@@ -864,7 +980,57 @@ function Orders({ products }) {
 
 const greetingMessage = { id: 'welcome', role: 'assistant', text: 'Hello! I can help you find products, explain our collection, shipping and ordering, or note down something you wish we carried.' }
 
-function ShopAssistant({ products, categories, user }) {
+function MarketingSignup() {
+  const [email, setEmail] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [registered, setRegistered] = useState(false)
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const submit = async (event) => {
+    event.preventDefault()
+    const normalized = email.trim().toLowerCase()
+    if (!validEmail.test(normalized)) {
+      setError('Please enter a valid email address.')
+      return
+    }
+    setSubmitting(true); setError('')
+    try {
+      await marketingApi.subscribe(normalized)
+      setRegistered(true)
+    } catch (subscribeError) {
+      setError(subscribeError.status === 400 ? 'Please enter a valid email address.' : subscribeError.status === 404 ? 'Marketing registration is not available yet.' : 'We could not register your email. Please try again.')
+    } finally { setSubmitting(false) }
+  }
+  return <div className="newsletter"><h4>Notes from the studio</h4><p>New collections, craft stories, and quiet inspiration.</p>{registered ? <div className="marketing-thanks" role="status"><Icon name="check" size={16}/><span>Thanks for registering for marketing messages.</span></div> : <form onSubmit={submit} noValidate><label><span className="sr-only">Email address</span><input type="email" inputMode="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); if (error) setError('') }} aria-invalid={Boolean(error)} aria-describedby={error ? 'marketing-email-error' : undefined} placeholder="Your email address"/><button disabled={submitting} aria-label="Subscribe to marketing messages">{submitting ? <span className="marketing-loading">…</span> : <Icon name="arrow"/>}</button></label>{error && <span className="marketing-error" id="marketing-email-error" role="alert">{error}</span>}</form>}</div>
+}
+
+function ContactModal({ close }) {
+  const [subject, setSubject] = useState('')
+  const [message, setMessage] = useState('')
+  const [status, setStatus] = useState('')
+  const messageRef = useRef(null)
+  const formatSelection = (type) => {
+    const input = messageRef.current
+    if (!input) return
+    const start = input.selectionStart
+    const end = input.selectionEnd
+    const selected = message.slice(start, end) || (type === 'list' ? 'List item' : 'text')
+    const formatted = type === 'bold' ? `**${selected}**` : type === 'italic' ? `_${selected}_` : selected.split('\n').map((line) => `• ${line.replace(/^•\s*/, '')}`).join('\n')
+    setMessage(`${message.slice(0, start)}${formatted}${message.slice(end)}`)
+    window.requestAnimationFrame(() => { input.focus(); input.setSelectionRange(start, start + formatted.length) })
+  }
+  const submit = (event) => {
+    event.preventDefault()
+    const recipient = ['shilpsoul26', 'gmail.com'].join('@')
+    const composeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipient)}&su=${encodeURIComponent(subject.trim())}&body=${encodeURIComponent(message.trim())}`
+    const composer = window.open(composeUrl, '_blank')
+    if (composer) composer.opener = null
+    setStatus(composer ? 'Gmail has opened in a new tab with your message ready to send.' : 'Your browser blocked the email window. Please allow pop-ups and try again.')
+  }
+  return <><div className="contact-scrim" onClick={close}/><section className="contact-modal" role="dialog" aria-modal="true" aria-labelledby="contact-heading"><header><div><span className="eyebrow">Write to us</span><h2 id="contact-heading">Contact Shilp &amp; Soul</h2><p>Share a question, order concern or product enquiry with our support team.</p></div><button type="button" className="icon-button" onClick={close} aria-label="Close contact form"><Icon name="close"/></button></header><form onSubmit={submit}><label>Subject<input required maxLength="150" value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="How can we help?"/></label><label>Message</label><div className="message-toolbar" role="toolbar" aria-label="Message formatting"><button type="button" onClick={() => formatSelection('bold')} aria-label="Bold selected text"><b>B</b></button><button type="button" onClick={() => formatSelection('italic')} aria-label="Italicise selected text"><i>I</i></button><button type="button" onClick={() => formatSelection('list')} aria-label="Make selected lines a bulleted list">• List</button></div><textarea ref={messageRef} required minLength="10" maxLength="5000" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write your message…"/><div className="contact-form-bottom"><span>{message.length} / 5000</span><button className="primary">Send message <Icon name="arrow" size={17}/></button></div>{status && <p className="contact-status" role="status">{status}</p>}</form></section></>
+}
+
+function ShopAssistant({ products, categories, user, onSignIn }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState([greetingMessage])
   const [draft, setDraft] = useState('')
@@ -873,6 +1039,7 @@ function ShopAssistant({ products, categories, user }) {
   const [category, setCategory] = useState('')
   const [details, setDetails] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showCustomerPrompt, setShowCustomerPrompt] = useState(false)
 
   const answer = (question) => {
     const query = question.toLowerCase().trim()
@@ -900,6 +1067,10 @@ function ShopAssistant({ products, categories, user }) {
 
   const submitRequirement = async (event) => {
     event.preventDefault()
+    if (!user) {
+      setShowCustomerPrompt(true)
+      return
+    }
     setSaving(true)
     try {
       await marketRequirementApi.create({
@@ -913,11 +1084,19 @@ function ShopAssistant({ products, categories, user }) {
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', text: 'Thank you—your request has been shared with our team.' }])
       setRequesting(false); setRequestedProduct(''); setCategory(''); setDetails('')
     } catch (error) {
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', text: error.status === 404 ? 'The request service is not available yet. Please contact us and mention this product.' : `I could not save that request: ${error.message}` }])
+      const message = error.status === 401
+        ? 'Your session has expired. Please sign in and try sharing the request again.'
+        : error.status === 409
+          ? 'This request has already been shared with our buying team.'
+          : error.status === 404
+            ? 'The request service is not available yet. Please contact us and mention this product.'
+            : 'We could not share your request right now. Please try again in a moment.'
+      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', text: message }])
     } finally { setSaving(false) }
   }
 
   return <div className={`shop-assistant ${open ? 'open' : ''}`}>
+    {showCustomerPrompt && <><div className="customer-request-scrim" onClick={() => setShowCustomerPrompt(false)}/><section className="customer-request-modal" role="dialog" aria-modal="true" aria-labelledby="customer-request-title"><button type="button" className="icon-button customer-request-close" onClick={() => setShowCustomerPrompt(false)} aria-label="Close"><Icon name="close"/></button><span className="eyebrow">Customer support</span><h2 id="customer-request-title">Create a customer account</h2><p>Please register as a customer to raise a request and receive personalised assistance from our support team.</p><div><button type="button" className="secondary" onClick={() => setShowCustomerPrompt(false)}>Not now</button><button type="button" className="primary" onClick={() => { setShowCustomerPrompt(false); onSignIn() }}>Register or sign in</button></div></section></>}
     {open && <section className="assistant-panel" aria-label="Shopping assistant">
       <header><div><span className="eyebrow">Here to help</span><h2>Shilp assistant</h2></div><button className="icon-button" onClick={() => setOpen(false)} aria-label="Close assistant"><Icon name="close"/></button></header>
       <div className="assistant-messages" aria-live="polite">{messages.map((message) => <p className={message.role} key={message.id}>{message.text}</p>)}</div>

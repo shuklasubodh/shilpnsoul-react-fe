@@ -36,6 +36,7 @@ export const authApi = {
   requestVerification: (destination, purpose, channel = 'EMAIL') => request('/notification-verifications/request', { auth: purpose !== 'REGISTRATION', method: 'POST', body: JSON.stringify({ channel, destination, purpose }) }),
   verifyCode: (verificationId, code, auth = true) => request('/notification-verifications/verify', { auth, method: 'POST', body: JSON.stringify({ verification_id: verificationId, code }) }),
   register: (details) => request('/auth/register', { auth: false, method: 'POST', body: JSON.stringify(details) }),
+  phoneAvailability: (countryCode, phone) => request(`/users/phone-availability?${new URLSearchParams({ country_code: countryCode, phone })}`, { auth: false }),
   session: () => request('/auth/session'),
 }
 
@@ -77,6 +78,8 @@ export const orderApi = {
   resendGuestSummary: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/resend`, { auth: false, method: 'POST', headers: { 'X-Order-Access-Token': accessToken } }),
   guestNotificationStatus: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/status`, { auth: false, headers: { 'X-Order-Access-Token': accessToken } }),
   track: (orderNumber, channel, destination) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ orderNumber, channel, destination }) }),
+  requestAction: (orderId, details) => request(`/orders/${encodeURIComponent(orderId)}/actions`, { method: 'POST', body: JSON.stringify(details) }),
+  requestGuestAction: (orderId, accessToken, details) => request(`/orders/${encodeURIComponent(orderId)}/guest-actions`, { auth: false, method: 'POST', headers: { 'X-Order-Access-Token': accessToken }, body: JSON.stringify(details) }),
 }
 
 export const paymentApi = {
@@ -88,7 +91,11 @@ export const paymentApi = {
 // Backed by the market_requirements table in the commerce API. Creation is
 // public so guests can share demand; listing/updating must be admin-protected.
 export const marketRequirementApi = {
-  create: (details) => request('/market-requirements', { auth: false, method: 'POST', body: JSON.stringify(details) }),
+  create: (details) => request('/market-requirements', { method: 'POST', body: JSON.stringify(details) }),
   list: () => request(`/market-requirements?${listQuery()}`),
   update: (id, details) => request(`/market-requirements/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(details) }),
+}
+
+export const marketingApi = {
+  subscribe: (email) => request('/marketing', { auth: false, method: 'POST', body: JSON.stringify({ email }) }),
 }
