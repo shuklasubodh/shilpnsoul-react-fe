@@ -99,3 +99,7 @@ export const marketRequirementApi = {
 export const marketingApi = {
   subscribe: (email) => request('/marketing', { auth: false, method: 'POST', body: JSON.stringify({ email }) }),
 }
+
+export const contactApi = {
+  send: (details) => request('/contact', { auth: false, method: 'POST', body: JSON.stringify(details) }),
+}

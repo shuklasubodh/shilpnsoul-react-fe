@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="160" fill="#304a3a"/>
+  <circle cx="512" cy="500" r="350" fill="none" stroke="#c99673" stroke-width="6"/>
+  <text x="512" y="423" text-anchor="middle" fill="#f8f6f0" font-family="Georgia,serif" font-size="165">shilp</text>
+  <text x="512" y="565" text-anchor="middle" fill="#c99673" font-family="Georgia,serif" font-size="128">&amp;</text>
+  <text x="512" y="707" text-anchor="middle" fill="#f8f6f0" font-family="Georgia,serif" font-size="165">soul</text>
+</svg>

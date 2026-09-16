@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Playfair+Display:ital,wght@0,500;1,500&display=swap');
-
 :root { font-family: 'DM Sans', sans-serif; color: #262723; background: #f8f6f0; font-synthesis: none; text-rendering: optimizeLegibility; --ink:#262723; --paper:#f8f6f0; --cream:#efeadf; --clay:#b75638; --green:#304a3a; }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
