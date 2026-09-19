@@ -3,6 +3,7 @@ import './App.css'
 import './Contact.css'
 import { authApi, cartApi, catalogApi, contactApi, marketingApi, marketRequirementApi, orderApi, paymentApi } from './api'
 import { getSessionUser, saveSession, startGuestSession } from './session'
+import productImageManifest from './product-image-manifest.json'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
 const LIVE_MODE = import.meta.env.VITE_LIVE_MODE === 'true'
@@ -36,6 +37,11 @@ const optimizeRemoteImage = (url, width = 800) => {
   }
   return value
 }
+const mobileProductImage = (url, width) => {
+  if (!/^https:\/\/[^/]+\.public\.blob\.vercel-storage\.com\/products\//i.test(String(url || ''))) return ''
+  const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
+  return `${apiBase}/images/mobile?${new URLSearchParams({ url, width: String(width) })}`
+}
 const editorialBase = (url) => {
   const match = String(url || '').match(/^\/(meet-our-makers|story-(?:small-batch|artisan-made|responsibly-sourced|made-to-last))(?:-(?:720|1200))?\.(?:png|webp|avif)$/)
   return match?.[1] || ''
@@ -43,10 +49,30 @@ const editorialBase = (url) => {
 
 function OptimizedImage({ src, alt, className, loading = 'lazy', width, height, sizes = '100vw', priority = false, onError }) {
   const base = editorialBase(src)
-  if (base) return <picture className={className ? `${className.split(' ')[0]}-picture` : undefined}><source type="image/avif" srcSet={`/${base}-720.avif 720w, /${base}-1200.avif 1200w`} sizes={sizes}/><source type="image/webp" srcSet={`/${base}-720.webp 720w, /${base}-1200.webp 1200w`} sizes={sizes}/><img className={className} src={`/${base}-1200.webp`} alt={alt} loading={priority ? 'eager' : loading} fetchPriority={priority ? 'high' : 'auto'} decoding="async" width={width} height={height} onError={onError}/></picture>
-  const optimized = optimizeRemoteImage(src, width || 800)
-  const supportsVariants = optimized !== src
-  return <img className={className} src={optimized} srcSet={supportsVariants ? [480, 800, 1200].map((candidate) => `${optimizeRemoteImage(src, candidate)} ${candidate}w`).join(', ') : undefined} sizes={supportsVariants ? sizes : undefined} alt={alt} loading={priority ? 'eager' : loading} fetchPriority={priority ? 'high' : 'auto'} decoding="async" width={width} height={height} onError={onError}/>
+  const localProduct = productImageManifest[src]
+  const handleError = (event) => {
+    const image = event.currentTarget
+    if (image.dataset.fallbackStage === 'placeholder') return
+    image.removeAttribute('srcset')
+    image.closest('picture')?.querySelectorAll('source').forEach((source) => source.remove())
+    if (!image.dataset.fallbackStage && src && src !== image.currentSrc && src !== FALLBACK_IMAGE) {
+      image.dataset.fallbackStage = 'original'
+      image.src = src
+      return
+    }
+    image.dataset.fallbackStage = 'placeholder'
+    image.src = FALLBACK_IMAGE
+    onError?.(event)
+  }
+  if (base) return <picture className={className ? `${className.split(' ')[0]}-picture` : undefined}><source type="image/avif" srcSet={`/${base}-720.avif 720w, /${base}-1200.avif 1200w`} sizes={sizes}/><source type="image/webp" srcSet={`/${base}-720.webp 720w, /${base}-1200.webp 1200w`} sizes={sizes}/><img className={className} src={`/${base}-1200.webp`} alt={alt} loading={priority ? 'eager' : loading} fetchPriority={priority ? 'high' : 'auto'} decoding="async" width={width} height={height} onError={handleError}/></picture>
+  const remoteMobile = !localProduct && mobileProductImage(src, width > 720 ? 960 : 480)
+  const optimized = localProduct ? `${localProduct}-${width > 720 ? 960 : 480}.webp` : remoteMobile || optimizeRemoteImage(src, width || 800)
+  const supportsVariants = Boolean(localProduct || remoteMobile) || optimized !== src
+  const srcSet = localProduct
+    ? `${localProduct}-480.webp 480w, ${localProduct}-960.webp 960w`
+    : remoteMobile ? `${mobileProductImage(src, 480)} 480w, ${mobileProductImage(src, 960)} 960w`
+    : supportsVariants ? [480, 800, 1200].map((candidate) => `${optimizeRemoteImage(src, candidate)} ${candidate}w`).join(', ') : undefined
+  return <img className={className} src={optimized} srcSet={srcSet} sizes={supportsVariants ? sizes : undefined} alt={alt} loading={priority ? 'eager' : loading} fetchPriority={priority ? 'high' : 'auto'} decoding="async" width={width} height={height} onError={handleError}/>
 }
 
 const STORE_STORIES = [
@@ -483,13 +509,15 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
   const heroSlide = heroSlides[heroIndex] || null
   const displayedHero = activeStory || heroSlide
   useEffect(() => {
-    if (activeStory || heroSlides.length < 2 || hasConstrainedConnection()) return undefined
+    if (activeStory || heroSlides.length < 2 || hasConstrainedConnection() || window.matchMedia('(max-width: 850px)').matches) return undefined
     const preloadNext = () => {
       const next = heroSlides[(heroIndex + 1) % heroSlides.length]
       if (!next?.image) return
       const image = new Image()
       image.decoding = 'async'
-      image.src = optimizeRemoteImage(next.image, 1200)
+      image.src = productImageManifest[next.image]
+        ? `${productImageManifest[next.image]}-960.webp`
+        : mobileProductImage(next.image, 960) || optimizeRemoteImage(next.image, 1200)
     }
     if ('requestIdleCallback' in window) {
       const idleId = window.requestIdleCallback(preloadNext, { timeout: 2500 })
@@ -520,7 +548,7 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
       {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">{normalizedSearch ? `No products match “${searchQuery.trim()}”.` : 'No pieces are available in this category yet.'}</div>}
       <div className="product-grid">{visibleProducts.map((product) => <ProductCard product={product} cartEntries={cart.filter((item) => item.id === product.id)} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} key={product.id} />)}</div>
     </section>
-    <section className={`craft-callout${footerFeature ? ` showing-${footerFeature}` : ''}`}>{footerFeature === 'story' ? <><OptimizedImage className="our-story-image editorial-image" src="/story-artisan-made.png" alt="Indian craft traditions represented through handmade objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our story</span><h2>A small window into India’s<br/><em>living craft traditions.</em></h2><p>Shilp &amp; Soul shares India’s rich cultural imagination through objects made to be lived with. Our collection moves from Bandhej, Patola and Laharia clutches to gota, zari and thread-embroidered potli bags, each carrying the colour and rhythm of regional textile traditions. Hand-painted trays, peacock serving boxes and carved wall frames bring the warmth of Indian woodcraft to the table and home. Radha-Krishna décor and small ceremonial asans reflect the quiet place of devotion in everyday life, while expressive shirts and kurtis carry craft into the wardrobe. Every piece connects contemporary living with skills, symbols and stories shaped across generations.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'artisans' ? <><OptimizedImage className="artisans-image editorial-image" src="/story-made-to-last.png" alt="Artisan working on traditional carved wall decoration" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our artisans</span><h2>Carved by hand.<br/><em>Alive with meaning.</em></h2><p>Behind our wall decorations are artisans who understand wood as both material and memory. Floral round frames are patiently carved to create depth through light and shadow; rectangular and triangular hanging sets are balanced, finished and assembled by hand. Radha-Krishna pieces bring devotional imagery into the home, where art and everyday worship have long lived together. The same eye for proportion and painted detail shapes our peacock serving boxes and wooden trays. Tool marks, subtle variations and the warmth of the grain are not imperfections—they are the maker’s presence, giving every Shilp &amp; Soul piece its individual character.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'journal' ? <><OptimizedImage className="journal-image editorial-image" src="/story-small-batch.png" alt="A curated collection of handmade Indian objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div className="journal-panel"><span className="eyebrow">The collection journal</span><h2>Objects, materials<br/>and their stories.</h2><div className="journal-product-list">{products.map((product) => { const description = product.product_description?.catalogue_description || product.description || product.craft || 'A thoughtfully selected piece shaped by Indian craft traditions.'; return <article key={product.id}><span>{product.sku || product.product_code || 'Shilp & Soul'}</span><h3>{product.name}</h3><p>{description}</p></article> })}{products.length === 0 && <p className="journal-empty">Our product stories are being prepared.</p>}<button className="text-link journal-explore" onClick={closeFooterFeature}>Explore our collection <Icon name="arrow" size={18}/></button></div></div></> : footerFeature === 'makers' ? <><OptimizedImage className="makers-image editorial-image" src="/meet-our-makers.png" alt="Young makers arranging Indian handcrafted products" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Meet our makers</span><h2>Young perspectives.<br/><em>India at heart.</em></h2><p>Our makers bring a contemporary eye to the visual languages they grew up around. Their taste is shaped by the geometry of Patola, the movement of Laharia, the dotted rhythm of Bandhej and the glow of gota and zari. They pair embroidered potlis and clutches with carved wall frames, painted trays and devotional motifs—not as pieces frozen in the past, but as living expressions of Indian culture. Through colour, texture and thoughtful composition, they imagine how inherited craft can belong naturally in today’s wardrobe and home. Each choice is an invitation to discover heritage with curiosity, confidence and personal style.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : <><OptimizedImage className="craft-image editorial-image" src="https://images.unsplash.com/photo-1604444517837-44f158b51105" alt="Independent artisan working by hand" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link" onClick={() => openFooterFeature('makers')}>Meet our makers <Icon name="arrow" size={18}/></button></div></>}</section>
+    <section className={`craft-callout${footerFeature ? ` showing-${footerFeature}` : ''}`}>{footerFeature === 'story' ? <><OptimizedImage className="our-story-image editorial-image" src="/story-artisan-made.png" alt="Indian craft traditions represented through handmade objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our story</span><h2>A small window into India’s<br/><em>living craft traditions.</em></h2><p>Shilp &amp; Soul shares India’s rich cultural imagination through objects made to be lived with. Our collection moves from Bandhej, Patola and Laharia clutches to gota, zari and thread-embroidered potli bags, each carrying the colour and rhythm of regional textile traditions. Hand-painted trays, peacock serving boxes and carved wall frames bring the warmth of Indian woodcraft to the table and home. Radha-Krishna décor and small ceremonial asans reflect the quiet place of devotion in everyday life, while expressive shirts and kurtis carry craft into the wardrobe. Every piece connects contemporary living with skills, symbols and stories shaped across generations.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'artisans' ? <><OptimizedImage className="artisans-image editorial-image" src="/story-made-to-last.png" alt="Artisan working on traditional carved wall decoration" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our artisans</span><h2>Carved by hand.<br/><em>Alive with meaning.</em></h2><p>Behind our wall decorations are artisans who understand wood as both material and memory. Floral round frames are patiently carved to create depth through light and shadow; rectangular and triangular hanging sets are balanced, finished and assembled by hand. Radha-Krishna pieces bring devotional imagery into the home, where art and everyday worship have long lived together. The same eye for proportion and painted detail shapes our peacock serving boxes and wooden trays. Tool marks, subtle variations and the warmth of the grain are not imperfections—they are the maker’s presence, giving every Shilp &amp; Soul piece its individual character.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'journal' ? <><OptimizedImage className="journal-image editorial-image" src="/story-small-batch.png" alt="A curated collection of handmade Indian objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div className="journal-panel"><span className="eyebrow">The collection journal</span><h2>Objects, materials<br/>and their stories.</h2><div className="journal-product-list">{products.map((product) => { const description = product.product_description?.catalogue_description || product.description || product.craft || 'A thoughtfully selected piece shaped by Indian craft traditions.'; return <article key={product.id}><span>{product.sku || product.product_code || 'Shilp & Soul'}</span><h3>{product.name}</h3><p>{description}</p></article> })}{products.length === 0 && <p className="journal-empty">Our product stories are being prepared.</p>}<button className="text-link journal-explore" onClick={closeFooterFeature}>Explore our collection <Icon name="arrow" size={18}/></button></div></div></> : footerFeature === 'makers' ? <><OptimizedImage className="makers-image editorial-image" src="/meet-our-makers.png" alt="Young makers arranging Indian handcrafted products" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Meet our makers</span><h2>Young perspectives.<br/><em>India at heart.</em></h2><p>Our makers bring a contemporary eye to the visual languages they grew up around. Their taste is shaped by the geometry of Patola, the movement of Laharia, the dotted rhythm of Bandhej and the glow of gota and zari. They pair embroidered potlis and clutches with carved wall frames, painted trays and devotional motifs—not as pieces frozen in the past, but as living expressions of Indian culture. Through colour, texture and thoughtful composition, they imagine how inherited craft can belong naturally in today’s wardrobe and home. Each choice is an invitation to discover heritage with curiosity, confidence and personal style.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : <><OptimizedImage className="craft-image editorial-image" src="/story-artisan-made.png" alt="Independent artisan working by hand" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link" onClick={() => openFooterFeature('makers')}>Meet our makers <Icon name="arrow" size={18}/></button></div></>}</section>
   </main>
 }
 
@@ -577,7 +605,7 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
     setExpanded(true)
   }
 
-  return <article className="product-card" onMouseEnter={() => setPreviewing(true)} onMouseLeave={stopPreview} onFocus={() => setPreviewing(true)} onBlur={(event) => {
+  return <article className="product-card" onMouseEnter={() => { if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) setPreviewing(true) }} onMouseLeave={stopPreview} onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget)) stopPreview()
   }}>
     <div className="product-image">
