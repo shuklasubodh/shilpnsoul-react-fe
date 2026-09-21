@@ -480,6 +480,7 @@ function Shop({ mode, products, categories, banners, loading, error, cart, addTo
   const [categoryId, setCategoryId] = useState('all')
   const [origin, setOrigin] = useState('all')
   const [productPage, setProductPage] = useState(1)
+  const [showAllProducts, setShowAllProducts] = useState(false)
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(hasConstrainedConnection)
   const [heroSource, updateHeroSource] = useState(() => localStorage.getItem('heroImageSource') === 'banner' ? 'banner' : 'product')
@@ -545,23 +546,27 @@ function Shop({ mode, products, categories, banners, loading, error, cart, addTo
   const pageSize = 10
   const pageCount = Math.max(1, Math.ceil(visibleProducts.length / pageSize))
   const currentPage = Math.min(productPage, pageCount)
-  const pagedProducts = visibleProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  const pagedProducts = showAllProducts ? visibleProducts : visibleProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize)
   const selectCategory = (id) => {
     setCategoryId(id)
     setProductPage(1)
+    setShowAllProducts(false)
   }
   const selectOrigin = (event) => {
     setOrigin(event.target.value)
     setProductPage(1)
+    setShowAllProducts(false)
   }
   const changeProductPage = (page) => {
     setProductPage(page)
+    setShowAllProducts(false)
     window.requestAnimationFrame(() => document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' }))
   }
   const viewAllProducts = () => {
     setCategoryId('all')
     setOrigin('all')
     setProductPage(1)
+    setShowAllProducts(true)
     showProducts()
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       document.querySelector('.product-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -581,7 +586,7 @@ function Shop({ mode, products, categories, banners, loading, error, cart, addTo
           <div className="filters" aria-label="Product categories"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => selectCategory('all')}>All objects</button>{categories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => selectCategory(String(category.id))} key={category.id}>{category.name}</button>)}</div>
           <label className="origin-filter"><span>Place of Origin</span><select value={origin} onChange={selectOrigin}><option value="all">All places</option>{origins.map((place) => <option value={place} key={place}>{place}</option>)}</select></label>
         </div>
-        {pageCount > 1 && <nav className="product-pagination" aria-label="Product pages"><button type="button" disabled={currentPage === 1} onClick={() => changeProductPage(currentPage - 1)} aria-label="Previous product page">‹</button>{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" className={page === currentPage ? 'selected' : ''} aria-current={page === currentPage ? 'page' : undefined} onClick={() => changeProductPage(page)} key={page}>{page}</button>)}<button type="button" disabled={currentPage === pageCount} onClick={() => changeProductPage(currentPage + 1)} aria-label="Next product page">›</button></nav>}
+        {!showAllProducts && pageCount > 1 && <nav className="product-pagination" aria-label="Product pages"><button type="button" disabled={currentPage === 1} onClick={() => changeProductPage(currentPage - 1)} aria-label="Previous product page">‹</button>{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" className={page === currentPage ? 'selected' : ''} aria-current={page === currentPage ? 'page' : undefined} onClick={() => changeProductPage(page)} key={page}>{page}</button>)}<button type="button" disabled={currentPage === pageCount} onClick={() => changeProductPage(currentPage + 1)} aria-label="Next product page">›</button></nav>}
       </div>
       {loading && <div className="catalog-status" role="status">Loading the collection…</div>}
       {error && <div className="catalog-status error" role="alert">{error}</div>}
