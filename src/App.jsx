@@ -598,7 +598,6 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
 
   const stopPreview = () => {
     setPreviewing(false)
-    setImageIndex(0)
   }
 
   const openGallery = () => {
@@ -635,6 +634,9 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
         {selectedCartEntry && <button className="remove-from-bag" onClick={() => removeFromCart(cartLineKey(selectedCartEntry))} aria-label={`Remove ${product.name} in ${selectedCartEntry.color} from bag`}>Remove <Icon name="close" size={14}/></button>}
       </div>
     </div>
+    {images.length > 1 && <div className="product-image-tiles" aria-label={`Choose an image for ${product.name}`}>
+      {images.slice(0, 5).map((url, index) => <button type="button" className={imageIndex === index ? 'selected' : ''} aria-label={`Show image ${index + 1} of ${images.length} for ${product.name}`} aria-pressed={imageIndex === index} onClick={() => { setPreviewing(false); setImageIndex(index) }} key={`${url}-card-tile`}><OptimizedImage src={url} alt="" loading="lazy" width={72} height={72} sizes="72px" /></button>)}
+    </div>}
     <div className="product-meta"><div><h3>{product.name}</h3><p>{product.craft}</p><p className={`stock-availability ${product.stock < 1 ? 'out-of-stock' : ''}`}><span>{product.stock < 1 ? 'Out of stock' : `${product.stock} available`}</span>{cartQuantity > 0 && <b>{cartQuantity} in bag</b>}</p></div><strong>S${product.price.toFixed(2)}</strong></div>
     {expanded && <div className="image-lightbox" role="dialog" aria-modal="true" aria-label={`${product.name} image gallery`} onClick={() => setExpanded(false)}>
       <div className="lightbox-panel product-gallery-panel" onClick={(event) => event.stopPropagation()}>
