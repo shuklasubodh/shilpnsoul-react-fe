@@ -12,7 +12,7 @@ const GUEST_CART_KEY = 'shoppingCart:guest'
 const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
 const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
 const isStripeSuccessReturn = () => paymentReturn() === '/payment/success' || new URLSearchParams(window.location.search).has('session_id')
-const initialView = () => window.location.pathname === '/admin/market-requirements' ? 'requirements-admin' : paymentReturn() === '/payment/cancel' || isStripeSuccessReturn() ? 'checkout' : 'shop'
+const initialView = () => window.location.pathname === '/admin/market-requirements' ? 'requirements-admin' : paymentReturn() === '/payment/cancel' || isStripeSuccessReturn() ? 'checkout' : 'home'
 const toE164 = (value, defaultCountryCode = '65') => {
   const raw = String(value || '').trim()
   const digits = raw.replace(/\D/g, '')
@@ -377,7 +377,7 @@ function App() {
   const toggleOurStory = () => {
     setFooterFeature((current) => {
       if (current !== 'story') {
-        setView('shop')
+        setView('team')
         window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.querySelector('.craft-callout')?.scrollIntoView({ behavior: 'smooth' })))
       }
       return current === 'story' ? null : 'story'
@@ -386,7 +386,7 @@ function App() {
   const toggleArtisans = () => {
     setFooterFeature((current) => {
       if (current !== 'artisans') {
-        setView('shop')
+        setView('team')
         window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.querySelector('.craft-callout')?.scrollIntoView({ behavior: 'smooth' })))
       }
       return current === 'artisans' ? null : 'artisans'
@@ -395,7 +395,7 @@ function App() {
   const toggleJournal = () => {
     setFooterFeature((current) => {
       if (current !== 'journal') {
-        setView('shop')
+        setView('team')
         window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.querySelector('.craft-callout')?.scrollIntoView({ behavior: 'smooth' })))
       }
       return current === 'journal' ? null : 'journal'
@@ -434,10 +434,12 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <button className="mobile-menu icon-button" aria-label="Open menu"><Icon name="menu" /></button>
-        <button className="brand" onClick={() => go('shop')}><span>shilp</span><i>&</i><span>soul</span></button>
+        <button className="brand" onClick={() => go('home')}><span>shilp</span><i>&</i><span>soul</span></button>
         <nav aria-label="Main navigation">
+          <button className={view === 'home' ? 'active' : ''} onClick={() => go('home')}>Home</button>
           <button className={view === 'shop' ? 'active' : ''} onClick={() => go('shop')}>Shop</button>
           <button onClick={showProducts}>New arrivals</button>
+          <button className={view === 'team' ? 'active' : ''} onClick={() => { setFooterFeature('makers'); go('team') }}>Soul Team</button>
           {!isLoggedIn && <button onClick={() => go('track')}>Track order</button>}
           {isLoggedIn && <button onClick={() => go('orders')}>My orders</button>}
         </nav>
@@ -448,9 +450,9 @@ function App() {
           <button className="icon-button bag-button" onClick={() => setCartOpen(true)} aria-label={`Shopping bag with ${count} items`}><Icon name="bag"/><b>{count}</b></button>
         </div>
       </header>
-      {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
+      {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setView('shop') }} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
-      {view === 'shop' && <Shop products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
+      {(view === 'home' || view === 'shop' || view === 'team') && <Shop mode={view} products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
       {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
@@ -474,8 +476,9 @@ function App() {
   )
 }
 
-function Shop({ products, categories, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts, footerFeature, openFooterFeature, closeFooterFeature }) {
+function Shop({ mode, products, categories, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts, footerFeature }) {
   const [categoryId, setCategoryId] = useState('all')
+  const [productPage, setProductPage] = useState(1)
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(hasConstrainedConnection)
   const [heroSource, updateHeroSource] = useState(() => localStorage.getItem('heroImageSource') === 'banner' ? 'banner' : 'product')
@@ -534,22 +537,35 @@ function Shop({ products, categories, banners, loading, error, cart, addToCart, 
   const visibleProducts = normalizedSearch
     ? products.filter((product) => `${product.name} ${product.craft}`.toLowerCase().includes(normalizedSearch))
     : categoryFilteredProducts
+  const pageSize = 10
+  const pageCount = Math.max(1, Math.ceil(visibleProducts.length / pageSize))
+  const currentPage = Math.min(productPage, pageCount)
+  const pagedProducts = visibleProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  const selectCategory = (id) => {
+    setCategoryId(id)
+    setProductPage(1)
+  }
+  const changeProductPage = (page) => {
+    setProductPage(page)
+    window.requestAnimationFrame(() => document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' }))
+  }
 
   return <main>
-    {!normalizedSearch && <><section className={`hero-section${activeStory ? ' story-active' : ''}`}>
+    {mode === 'home' && !normalizedSearch && <><section className={`hero-section${activeStory ? ' story-active' : ''}`}>
       <div className="hero-copy"><span className="eyebrow">{activeStory?.eyebrow || 'Handmade for the everyday'}</span><h1>{activeStory?.heading || <>Live with things<br/><em>that have a soul.</em></>}</h1><p>{activeStory?.text || 'Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.'}</p><button className="primary" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div>
       <div className="hero-art">{displayedHero ? <OptimizedImage className="hero-image" src={displayedHero.image} alt={activeStory ? `${activeStory.title}, Shilp & Soul craft story` : heroSlide?.alt || 'Handcrafted home decor'} priority width={1200} height={675} sizes="(max-width: 850px) 100vw, 52vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/> : <div className="hero-image" role="img" aria-label="Handcrafted home decor"/>}<div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={!activeStory && heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={!activeStory && heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div>{!activeStory && <div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div>}<div className="maker-note"><span>{activeStory ? `Our story · ${activeStory.number}` : heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{activeStory?.title || heroSlide?.label || (heroSource === 'banner' ? 'No active banners' : 'Objects made with care')}</strong><button aria-label="Explore the collection" onClick={() => activeStory ? showProducts() : heroSlide?.link ? window.location.assign(heroSlide.link) : document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
     </section>
     <section className="story-strip" aria-label="The Shilp & Soul approach">{STORE_STORIES.map((story) => <button type="button" className={activeStory?.number === story.number ? 'selected' : ''} aria-pressed={activeStory?.number === story.number} onClick={() => { setActiveStory(story); setHeroPaused(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }} key={story.number}><span>{story.number}</span> {story.title}</button>)}</section></>}
-    <section className={`collection${normalizedSearch ? ' search-results' : ''}`} id="products">
+    {mode === 'shop' && <section className={`collection${normalizedSearch ? ' search-results' : ''}`} id="products">
       <div className="section-head"><div><span className="eyebrow">{normalizedSearch ? 'Search results' : 'Curated for you'}</span><h2>{normalizedSearch ? `${visibleProducts.length} ${visibleProducts.length === 1 ? 'piece' : 'pieces'} found` : 'Objects of quiet beauty'}</h2></div>{!normalizedSearch && <button>View all pieces <Icon name="arrow" size={17}/></button>}</div>
-      <div className="filters" aria-label="Product categories"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => setCategoryId('all')}>All objects</button>{categories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => setCategoryId(String(category.id))} key={category.id}>{category.name}</button>)}</div>
+      {pageCount > 1 && <nav className="product-pagination" aria-label="Product pages"><button type="button" disabled={currentPage === 1} onClick={() => changeProductPage(currentPage - 1)} aria-label="Previous product page">‹</button>{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" className={page === currentPage ? 'selected' : ''} aria-current={page === currentPage ? 'page' : undefined} onClick={() => changeProductPage(page)} key={page}>{page}</button>)}<button type="button" disabled={currentPage === pageCount} onClick={() => changeProductPage(currentPage + 1)} aria-label="Next product page">›</button></nav>}
+      <div className="filters" aria-label="Product categories"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => selectCategory('all')}>All objects</button>{categories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => selectCategory(String(category.id))} key={category.id}>{category.name}</button>)}</div>
       {loading && <div className="catalog-status" role="status">Loading the collection…</div>}
       {error && <div className="catalog-status error" role="alert">{error}</div>}
       {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">{normalizedSearch ? `No products match “${searchQuery.trim()}”.` : 'No pieces are available in this category yet.'}</div>}
-      <div className="product-grid">{visibleProducts.map((product) => <ProductCard product={product} cartEntries={cart.filter((item) => item.id === product.id)} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} key={product.id} />)}</div>
-    </section>
-    <section className={`craft-callout${footerFeature ? ` showing-${footerFeature}` : ''}`}>{footerFeature === 'story' ? <><OptimizedImage className="our-story-image editorial-image" src="/story-artisan-made.png" alt="Indian craft traditions represented through handmade objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our story</span><h2>A small window into India’s<br/><em>living craft traditions.</em></h2><p>Shilp &amp; Soul shares India’s rich cultural imagination through objects made to be lived with. Our collection moves from Bandhej, Patola and Laharia clutches to gota, zari and thread-embroidered potli bags, each carrying the colour and rhythm of regional textile traditions. Hand-painted trays, peacock serving boxes and carved wall frames bring the warmth of Indian woodcraft to the table and home. Radha-Krishna décor and small ceremonial asans reflect the quiet place of devotion in everyday life, while expressive shirts and kurtis carry craft into the wardrobe. Every piece connects contemporary living with skills, symbols and stories shaped across generations.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'artisans' ? <><OptimizedImage className="artisans-image editorial-image" src="/story-made-to-last.png" alt="Artisan working on traditional carved wall decoration" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our artisans</span><h2>Carved by hand.<br/><em>Alive with meaning.</em></h2><p>Behind our wall decorations are artisans who understand wood as both material and memory. Floral round frames are patiently carved to create depth through light and shadow; rectangular and triangular hanging sets are balanced, finished and assembled by hand. Radha-Krishna pieces bring devotional imagery into the home, where art and everyday worship have long lived together. The same eye for proportion and painted detail shapes our peacock serving boxes and wooden trays. Tool marks, subtle variations and the warmth of the grain are not imperfections—they are the maker’s presence, giving every Shilp &amp; Soul piece its individual character.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'journal' ? <><OptimizedImage className="journal-image editorial-image" src="/story-small-batch.png" alt="A curated collection of handmade Indian objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div className="journal-panel"><span className="eyebrow">The collection journal</span><h2>Objects, materials<br/>and their stories.</h2><div className="journal-product-list">{products.map((product) => { const description = product.product_description?.catalogue_description || product.description || product.craft || 'A thoughtfully selected piece shaped by Indian craft traditions.'; return <article key={product.id}><span>{product.sku || product.product_code || 'Shilp & Soul'}</span><h3>{product.name}</h3><p>{description}</p></article> })}{products.length === 0 && <p className="journal-empty">Our product stories are being prepared.</p>}<button className="text-link journal-explore" onClick={closeFooterFeature}>Explore our collection <Icon name="arrow" size={18}/></button></div></div></> : footerFeature === 'makers' ? <><OptimizedImage className="makers-image editorial-image" src="/meet-our-makers.png" alt="Young makers arranging Indian handcrafted products" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Meet our makers</span><h2>Young perspectives.<br/><em>India at heart.</em></h2><p>Our makers bring a contemporary eye to the visual languages they grew up around. Their taste is shaped by the geometry of Patola, the movement of Laharia, the dotted rhythm of Bandhej and the glow of gota and zari. They pair embroidered potlis and clutches with carved wall frames, painted trays and devotional motifs—not as pieces frozen in the past, but as living expressions of Indian culture. Through colour, texture and thoughtful composition, they imagine how inherited craft can belong naturally in today’s wardrobe and home. Each choice is an invitation to discover heritage with curiosity, confidence and personal style.</p><button className="text-link" onClick={closeFooterFeature}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : <><OptimizedImage className="craft-image editorial-image" src="/story-artisan-made.png" alt="Independent artisan working by hand" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">The hands behind the work</span><h2>Craft is a conversation<br/>across generations.</h2><p>We work directly with independent makers and family workshops, honouring techniques that have been refined over centuries.</p><button className="text-link" onClick={() => openFooterFeature('makers')}>Meet our makers <Icon name="arrow" size={18}/></button></div></>}</section>
+      <div className="product-grid">{pagedProducts.map((product) => <ProductCard product={product} cartEntries={cart.filter((item) => item.id === product.id)} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} key={product.id} />)}</div>
+    </section>}
+    {mode === 'team' && <section className={`craft-callout${footerFeature ? ` showing-${footerFeature}` : ''}`}>{footerFeature === 'story' ? <><OptimizedImage className="our-story-image editorial-image" src="/story-artisan-made.png" alt="Indian craft traditions represented through handmade objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our story</span><h2>A small window into India’s<br/><em>living craft traditions.</em></h2><p>Shilp &amp; Soul shares India’s rich cultural imagination through objects made to be lived with. Our collection moves from Bandhej, Patola and Laharia clutches to gota, zari and thread-embroidered potli bags, each carrying the colour and rhythm of regional textile traditions. Hand-painted trays, peacock serving boxes and carved wall frames bring the warmth of Indian woodcraft to the table and home. Radha-Krishna décor and small ceremonial asans reflect the quiet place of devotion in everyday life, while expressive shirts and kurtis carry craft into the wardrobe. Every piece connects contemporary living with skills, symbols and stories shaped across generations.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'artisans' ? <><OptimizedImage className="artisans-image editorial-image" src="/story-made-to-last.png" alt="Artisan working on traditional carved wall decoration" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our artisans</span><h2>Carved by hand.<br/><em>Alive with meaning.</em></h2><p>Behind our wall decorations are artisans who understand wood as both material and memory. Floral round frames are patiently carved to create depth through light and shadow; rectangular and triangular hanging sets are balanced, finished and assembled by hand. Radha-Krishna pieces bring devotional imagery into the home, where art and everyday worship have long lived together. The same eye for proportion and painted detail shapes our peacock serving boxes and wooden trays. Tool marks, subtle variations and the warmth of the grain are not imperfections—they are the maker’s presence, giving every Shilp &amp; Soul piece its individual character.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'journal' ? <><OptimizedImage className="journal-image editorial-image" src="/story-small-batch.png" alt="A curated collection of handmade Indian objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div className="journal-panel"><span className="eyebrow">The collection journal</span><h2>Objects, materials<br/>and their stories.</h2><div className="journal-product-list">{products.map((product) => { const description = product.product_description?.catalogue_description || product.description || product.craft || 'A thoughtfully selected piece shaped by Indian craft traditions.'; return <article key={product.id}><span>{product.sku || product.product_code || 'Shilp & Soul'}</span><h3>{product.name}</h3><p>{description}</p></article> })}{products.length === 0 && <p className="journal-empty">Our product stories are being prepared.</p>}<button className="text-link journal-explore" onClick={showProducts}>Explore our collection <Icon name="arrow" size={18}/></button></div></div></> : <><OptimizedImage className="makers-image editorial-image" src="/meet-our-makers.png" alt="Young makers arranging Indian handcrafted products" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Meet our makers</span><h2>Young perspectives.<br/><em>India at heart.</em></h2><p>Our makers bring a contemporary eye to the visual languages they grew up around. Their taste is shaped by the geometry of Patola, the movement of Laharia, the dotted rhythm of Bandhej and the glow of gota and zari. They pair embroidered potlis and clutches with carved wall frames, painted trays and devotional motifs—not as pieces frozen in the past, but as living expressions of Indian culture. Through colour, texture and thoughtful composition, they imagine how inherited craft can belong naturally in today’s wardrobe and home. Each choice is an invitation to discover heritage with curiosity, confidence and personal style.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></>}</section>}
   </main>
 }
 
@@ -560,10 +576,9 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
   const colors = colorRecords.filter((color) => Number(color.quantity) > 0)
   const description = product.product_description || {}
   const [imageIndex, setImageIndex] = useState(0)
-  const [previewing, setPreviewing] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [expandedIndex, setExpandedIndex] = useState(0)
-  const [selectedColorId, setSelectedColorId] = useState('')
+  const [selectedColorId, setSelectedColorId] = useState(() => colors.length ? String(colors[0].id) : '')
   const selectedColor = colors.find((color) => String(color.id) === selectedColorId)
   const selectedCartEntry = requiresColor
     ? cartEntries.find((item) => String(item.productColorId) === selectedColorId)
@@ -571,14 +586,6 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
   const availableStock = Number(selectedColor?.quantity ?? product.stock)
   const canAdd = availableStock > 0 && (!requiresColor || Boolean(selectedColor))
   const cartQuantity = cartEntries.reduce((sum, item) => sum + item.quantity, 0)
-
-  useEffect(() => {
-    if (!previewing || images.length < 2) return undefined
-    const timer = window.setInterval(() => {
-      setImageIndex((current) => (current + 1) % images.length)
-    }, 900)
-    return () => window.clearInterval(timer)
-  }, [previewing, images.length])
 
   useEffect(() => {
     if (!expanded) return undefined
@@ -596,38 +603,18 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
     }
   }, [expanded, images.length])
 
-  const stopPreview = () => {
-    setPreviewing(false)
-  }
-
   const openGallery = () => {
     setExpandedIndex(imageIndex)
     setExpanded(true)
   }
 
-  return <article className="product-card" onMouseEnter={() => { if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) setPreviewing(true) }} onMouseLeave={stopPreview} onBlur={(event) => {
-    if (!event.currentTarget.contains(event.relatedTarget)) stopPreview()
-  }}>
+  return <article className="product-card">
     <div className="product-image">
       <button className="zoom-trigger" onClick={openGallery} aria-label={`Enlarge images for ${product.name}`}>
         <OptimizedImage src={images[imageIndex]} alt={`${product.name}${images.length > 1 ? `, view ${imageIndex + 1} of ${images.length}` : ''}`} loading="lazy" width={720} height={720} sizes="(max-width: 520px) 100vw, (max-width: 850px) 50vw, 33vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} />
       </button>
       {images.length > 1 && <span className="image-count" aria-hidden="true">{imageIndex + 1}/{images.length}</span>}
       <button className="wish" aria-label={`Save ${product.name}`}><Icon name="heart" size={18}/></button>
-      <aside className="product-hover-details">
-        {description.festive_note && <blockquote className="festive-note"><b>Festive note</b>{description.festive_note}</blockquote>}
-        <span className="eyebrow">Product details</span><h4>{description.title || product.name}</h4>
-        <p>{description.catalogue_description || product.description || 'A thoughtfully selected handcrafted piece.'}</p>
-        {description.dimensions && <small><b>Dimensions</b>{description.dimensions}</small>}
-        {description.pattern_craft && <small><b>Craft</b>{description.pattern_craft}</small>}
-        {requiresColor ? <label>Choose colour<select value={selectedColorId} onChange={(event) => setSelectedColorId(event.target.value)}><option value="">Select colour</option>{colors.map((color) => <option value={color.id} key={color.id}>{color.color} ({color.quantity} available)</option>)}</select></label> : <p className="master-stock-note">No colour selection required · {product.stock} available</p>}
-        <div className={`detail-cart-actions ${selectedCartEntry ? 'has-item' : ''}`}>
-          {selectedCartEntry && <p className="detail-cart-status"><b>{selectedCartEntry.quantity}</b> in bag</p>}
-          <button className="primary detail-add" disabled={!canAdd || (selectedCartEntry && selectedCartEntry.quantity >= selectedCartEntry.stock)} onClick={() => addToCart(product, selectedColor)}>{selectedCartEntry ? 'Add one more' : 'Add to bag'} <Icon name="plus" size={15}/></button>
-          {selectedCartEntry && <button className="detail-reduce" onClick={() => updateQuantity(cartLineKey(selectedCartEntry), -1)} aria-label={`Reduce ${product.name} in ${selectedCartEntry.color} by one`}>Reduce <Icon name="minus" size={14}/></button>}
-          {selectedCartEntry && <button className="detail-remove" onClick={() => removeFromCart(cartLineKey(selectedCartEntry))} aria-label={`Remove ${product.name} in ${selectedCartEntry.color} from bag`}>Remove <Icon name="close" size={14}/></button>}
-        </div>
-      </aside>
       <div className={`product-image-actions ${selectedCartEntry ? 'has-remove' : ''}`}>
         <button className="quick-add" disabled={!canAdd} onClick={() => addToCart(product, selectedColor)}>{requiresColor ? colors.length ? selectedColor ? 'Quick add' : 'Choose colour' : 'Colours out of stock' : product.stock > 0 ? 'Quick add' : 'Out of stock'} <Icon name="plus" size={16}/></button>
         {selectedCartEntry && <button className="reduce-in-bag" onClick={() => updateQuantity(cartLineKey(selectedCartEntry), -1)} aria-label={`Reduce ${product.name} in ${selectedCartEntry.color} by one`}>Reduce <Icon name="minus" size={14}/></button>}
@@ -635,9 +622,10 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
       </div>
     </div>
     {images.length > 1 && <div className="product-image-tiles" aria-label={`Choose an image for ${product.name}`}>
-      {images.slice(0, 5).map((url, index) => <button type="button" className={imageIndex === index ? 'selected' : ''} aria-label={`Show image ${index + 1} of ${images.length} for ${product.name}`} aria-pressed={imageIndex === index} onClick={() => { setPreviewing(false); setImageIndex(index) }} key={`${url}-card-tile`}><OptimizedImage src={url} alt="" loading="lazy" width={72} height={72} sizes="72px" /></button>)}
+      {images.slice(0, 5).map((url, index) => <button type="button" className={imageIndex === index ? 'selected' : ''} aria-label={`Show image ${index + 1} of ${images.length} for ${product.name}`} aria-pressed={imageIndex === index} onClick={() => setImageIndex(index)} key={`${url}-card-tile`}><OptimizedImage src={url} alt="" loading="lazy" width={72} height={72} sizes="72px" /></button>)}
     </div>}
     <div className="product-meta"><div><h3>{product.name}</h3><p>{product.craft}</p><p className={`stock-availability ${product.stock < 1 ? 'out-of-stock' : ''}`}><span>{product.stock < 1 ? 'Out of stock' : `${product.stock} available`}</span>{cartQuantity > 0 && <b>{cartQuantity} in bag</b>}</p></div><strong>S${product.price.toFixed(2)}</strong></div>
+    {requiresColor ? <label className="product-card-color">Colour<select aria-label={`Choose colour for ${product.name}`} value={selectedColorId} onChange={(event) => setSelectedColorId(event.target.value)} disabled={!colors.length}>{colors.length ? colors.map((color) => <option value={color.id} key={color.id}>{color.color} ({color.quantity} available)</option>) : <option value="">Colours out of stock</option>}</select></label> : null}
     {expanded && <div className="image-lightbox" role="dialog" aria-modal="true" aria-label={`${product.name} image gallery`} onClick={() => setExpanded(false)}>
       <div className="lightbox-panel product-gallery-panel" onClick={(event) => event.stopPropagation()}>
         <button className="lightbox-close icon-button" onClick={() => setExpanded(false)} aria-label="Close image gallery"><Icon name="close" /></button>
