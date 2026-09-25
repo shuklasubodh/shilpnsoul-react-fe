@@ -551,10 +551,10 @@ function Shop({ mode, products, categories, banners, loading, error, cart, addTo
   const categoryFilteredProducts = categoryId === 'all'
     ? products
     : products.filter((product) => String(product.category_id) === categoryId)
-  const origins = useMemo(() => [...new Set(products.map((product) => String(product.description || '').trim()).filter(Boolean))].sort((first, second) => first.localeCompare(second)), [products])
+  const origins = useMemo(() => [...new Set(products.map((product) => String(product.place || '').trim()).filter(Boolean))].sort((first, second) => first.localeCompare(second)), [products])
   const originFilteredProducts = origin === 'all'
     ? categoryFilteredProducts
-    : categoryFilteredProducts.filter((product) => String(product.description || '').trim() === origin)
+    : categoryFilteredProducts.filter((product) => String(product.place || '').trim() === origin)
   const normalizedSearch = searchQuery.trim().toLowerCase()
   const visibleProducts = normalizedSearch
     ? originFilteredProducts.filter((product) => `${product.name} ${product.craft} ${product.description || ''}`.toLowerCase().includes(normalizedSearch))
