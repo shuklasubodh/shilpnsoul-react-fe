@@ -9,6 +9,7 @@ const FALLBACK_IMAGE = '/product-placeholder.svg'
 const GUEST_CHECKOUT_ENABLED = import.meta.env.VITE_GUEST_CHECKOUT_ENABLED === 'true'
 const REGISTRATION_ENABLED = import.meta.env.VITE_REGISTRATION_ENABLED === 'true'
 const WHATSAPP_ENABLED = import.meta.env.VITE_WHATSAPP_ENABLED === 'true'
+const STRIPE_PAYMENTS_ENABLED = import.meta.env.VITE_STRIPE_PAYMENTS_ENABLED === 'true'
 const REGISTRATION_CHANNELS = WHATSAPP_ENABLED ? ['EMAIL', 'SMS', 'WHATSAPP'] : ['EMAIL', 'SMS']
 const GUEST_CART_KEY = 'shoppingCart:guest'
 const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
@@ -773,6 +774,10 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   const submitCheckout = async (event) => {
     event.preventDefault()
     setPaymentError('')
+    if (!STRIPE_PAYMENTS_ENABLED) {
+      setPaymentError('Online payments are temporarily unavailable while pilot testing is completed.')
+      return
+    }
     setRedirecting(true)
     const data = new FormData(event.currentTarget)
     const submittedPhone = String(data.get('phone') || '').trim()
@@ -791,14 +796,17 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
       if (pending?.id) {
         try {
           const previousOrder = await paymentApi.orderResult(pending.id, pending.accessToken)
-          if (previousOrder.payment_status === 'PAID' || previousOrder.status === 'CANCELLED') {
+          if (previousOrder.payment_status === 'PAID') {
+            throw new Error('This payment is already complete. Open My orders to view the confirmed order.')
+          }
+          if (previousOrder.status === 'CANCELLED') {
             sessionStorage.removeItem(pendingKey)
-            pending = null
+            throw new Error('Your previous payment reservation expired. The items remain in your bag—review availability, then press pay again to create a new reservation.')
           }
         } catch (error) {
           if ([403, 404].includes(error.status)) {
             sessionStorage.removeItem(pendingKey)
-            pending = null
+            throw new Error('The previous payment reservation is no longer available. The items remain in your bag—review them, then press pay again.', { cause: error })
           } else throw error
         }
       }
@@ -852,8 +860,8 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn || !GUEST_CHECKOUT_ENABLED} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{!GUEST_CHECKOUT_ENABLED ? 'Guest checkout is unavailable' : isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
       <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address *<input required name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>SMS phone{notificationChannel === 'SMS' ? ' *' : ' (optional)'}<input required={notificationChannel === 'SMS'} name="phone" type="tel" value={checkoutPhone} onChange={changeCheckoutPhone} placeholder="+6591234567" title="Use international E.164 format, for example +6591234567" aria-invalid={notificationChannel === 'SMS' && checkoutPhone.length > 0 && !smsNumberIsE164}/></label>{WHATSAPP_ENABLED && <label>WhatsApp{notificationChannel === 'WHATSAPP' ? ' *' : ' (optional)'}<input required={notificationChannel === 'WHATSAPP'} name="whatsapp" type="tel" value={checkoutWhatsapp} onChange={changeCheckoutWhatsapp} placeholder="+6591234567"/></label>}<label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
         <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className={notificationChannel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'EMAIL'} onChange={() => chooseNotificationChannel('EMAIL')}/> Email</label>{WHATSAPP_ENABLED && <label className={notificationChannel === 'WHATSAPP' ? 'selected' : ''} aria-disabled={!whatsappChannelAvailable}><input type="radio" name="notificationChannel" checked={notificationChannel === 'WHATSAPP'} disabled={!whatsappChannelAvailable} onChange={() => chooseNotificationChannel('WHATSAPP')}/> WhatsApp</label>}<label className={notificationChannel === 'SMS' ? 'selected' : ''} aria-disabled={!smsChannelAvailable}><input type="radio" name="notificationChannel" checked={notificationChannel === 'SMS'} disabled={!smsChannelAvailable} onChange={() => chooseNotificationChannel('SMS')}/> SMS</label></div>{!smsChannelAvailable&&<p className="verification-note">Enter an SMS number to enable SMS verification.</p>}{accountNotificationConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your selected account contact is already verified.</p> : verificationToken ? <p className="verification-success"><Icon name="check" size={15}/> Checkout contact confirmed.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm {notificationChannelName}</button></div>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
-        <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">Pay securely with Stripe</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className="selected"><input type="radio" name="paymentMethod" checked readOnly/><span><b>Credit/debit card or PayNow</b><small>Choose either option on Stripe’s secure payment screen</small></span><strong>Stripe</strong></label></div></section>
-        <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label>{paymentError && <p className="payment-error" role="alert">{paymentError}</p>}<button className="primary full" disabled={!cart.length || !notificationConfirmed || redirecting}>{redirecting ? 'Reserving your items…' : `Reserve items & pay S$${orderTotal.toFixed(2)}`} {!redirecting && <Icon name="arrow" size={18}/>}</button><p className="secure">Your items are reserved for a limited time when Stripe opens. Card details never touch our servers.</p></form>
+        <section className="payment-section" aria-labelledby="payment-heading"><div className="payment-heading"><div><span className="eyebrow">Payment method</span><h2 id="payment-heading">{STRIPE_PAYMENTS_ENABLED ? 'Pay securely with Stripe' : 'Payments temporarily unavailable'}</h2></div><strong>S${orderTotal.toFixed(2)}</strong></div><div className="payment-options"><label className={STRIPE_PAYMENTS_ENABLED ? 'selected' : 'disabled'} aria-disabled={!STRIPE_PAYMENTS_ENABLED}><input type="radio" name="paymentMethod" checked={STRIPE_PAYMENTS_ENABLED} disabled={!STRIPE_PAYMENTS_ENABLED} readOnly/><span><b>Credit/debit card or PayNow</b><small>{STRIPE_PAYMENTS_ENABLED ? 'Choose either option on Stripe’s secure payment screen' : 'Disabled until pilot live testing is complete'}</small></span><strong>Stripe</strong></label></div></section>
+        <label className="checkbox"><input type="checkbox"/> Send me occasional notes from the studio</label>{paymentError && <p className="payment-error" role="alert">{paymentError}</p>}<button className="primary full" disabled={!STRIPE_PAYMENTS_ENABLED || !cart.length || !notificationConfirmed || redirecting}>{!STRIPE_PAYMENTS_ENABLED ? 'Payments opening soon' : redirecting ? 'Reserving your items…' : `Reserve items & pay S$${orderTotal.toFixed(2)}`} {STRIPE_PAYMENTS_ENABLED && !redirecting && <Icon name="arrow" size={18}/>}</button><p className="secure">{STRIPE_PAYMENTS_ENABLED ? 'Your items are reserved for a limited time when Stripe opens. Card details never touch our servers.' : 'Checkout will reopen after pilot live testing is complete. No order or inventory reservation will be created.'}</p></form>
       {phoneFormatError && <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="phone-format-modal-title" onClick={() => setPhoneFormatError('')}><div className="payment-modal-panel phone-format-modal" onClick={(event) => event.stopPropagation()}><button className="icon-button payment-modal-close" type="button" onClick={() => setPhoneFormatError('')} aria-label="Close phone number error"><Icon name="close" /></button><span className="eyebrow">Invalid SMS number</span><h2 id="phone-format-modal-title">Use E.164 format</h2><p>{phoneFormatError}</p><button className="primary full" type="button" onClick={() => setPhoneFormatError('')}>Correct phone number</button></div></div>}
     </section><OrderSummary cart={cart} total={total}/></div>
   </main>
@@ -989,7 +997,7 @@ function Orders({ products }) {
     let active = true
     const loadOrders = async () => {
       try {
-        const summaries = await orderApi.list()
+        const summaries = (await orderApi.list()).filter((order) => order.payment_status === 'PAID')
         const detailed = await Promise.all(summaries.map(async (order) => {
           try { return await orderApi.get(order.id) }
           catch { return order }
