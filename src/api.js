@@ -14,7 +14,8 @@ async function request(path, options = {}) {
     },
   })
   const payload = await response.json().catch(() => ({}))
-  if (response.status === 401 && token) {
+  const authenticationFailed = response.status === 401 && /^Authentication (?:is )?required\.?$/i.test(String(payload.message || payload.error || '').trim())
+  if (token && authenticationFailed) {
     clearSession()
     window.dispatchEvent(new Event('auth:expired'))
   }
