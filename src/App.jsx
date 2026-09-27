@@ -443,9 +443,7 @@ function App() {
     setView('shop')
     setCartOpen(false)
     if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' })
-    }))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const openSearch = () => {
     setView('shop')
