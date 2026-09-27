@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import './Contact.css'
 import { authApi, cartApi, catalogApi, contactApi, marketingApi, marketRequirementApi, orderApi, paymentApi } from './api'
-import { getSessionUser, saveSession, startGuestSession } from './session'
+import { getGuestCartStorageKey, getSessionUser, saveSession, startGuestSession } from './session'
 import productImageManifest from './product-image-manifest.json'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
@@ -10,8 +10,14 @@ const GUEST_CHECKOUT_ENABLED = import.meta.env.VITE_GUEST_CHECKOUT_ENABLED === '
 const REGISTRATION_ENABLED = import.meta.env.VITE_REGISTRATION_ENABLED === 'true'
 const WHATSAPP_ENABLED = import.meta.env.VITE_WHATSAPP_ENABLED === 'true'
 const STRIPE_PAYMENTS_ENABLED = import.meta.env.VITE_STRIPE_PAYMENTS_ENABLED === 'true'
+const DELIVERY_FEE = 5
+const FREE_DELIVERY_THRESHOLD = 30
+const LAUNCH_SPECIAL_MESSAGE = 'Launch special: Order for S$30/- and receive free delivery'
+
+const deliveryChargeFor = subtotal => subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE
 const REGISTRATION_CHANNELS = WHATSAPP_ENABLED ? ['EMAIL', 'SMS', 'WHATSAPP'] : ['EMAIL', 'SMS']
-const GUEST_CART_KEY = 'shoppingCart:guest'
+const LEGACY_GUEST_CART_KEY = 'shoppingCart:guest'
+const GUEST_CART_TTL_MS = 10 * 60 * 1000
 const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
 const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
 const isStripeSuccessReturn = () => paymentReturn() === '/payment/success' || new URLSearchParams(window.location.search).has('session_id')
@@ -114,10 +120,28 @@ const STORE_STORIES = [
   },
 ]
 
+const parseGuestCart = (value) => {
+  const saved = JSON.parse(value)
+  if (Array.isArray(saved)) return { items: saved, updatedAt: Date.now() }
+  if (!Array.isArray(saved?.items) || !Number.isFinite(saved?.updatedAt)) return { items: [], updatedAt: 0 }
+  return saved
+}
+
 const savedGuestCart = () => {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(GUEST_CART_KEY))
-    return Array.isArray(saved) ? saved : []
+    const storageKey = getGuestCartStorageKey()
+    const persisted = localStorage.getItem(storageKey)
+    const legacy = sessionStorage.getItem(LEGACY_GUEST_CART_KEY)
+    if (!persisted && !legacy) return []
+    const saved = parseGuestCart(persisted || legacy)
+    if (Date.now() - saved.updatedAt >= GUEST_CART_TTL_MS) {
+      localStorage.removeItem(storageKey)
+      sessionStorage.removeItem(LEGACY_GUEST_CART_KEY)
+      return []
+    }
+    if (!persisted) localStorage.setItem(storageKey, JSON.stringify(saved))
+    if (legacy) sessionStorage.removeItem(LEGACY_GUEST_CART_KEY)
+    return saved.items
   } catch {
     return []
   }
@@ -126,7 +150,7 @@ const savedGuestCart = () => {
 const cartRecords = (payload) => Array.isArray(payload) ? payload : payload?.items || payload?.cart_items || []
 const cartLineKey = (item) => item.lineKey || `${item.id}:${item.productColorId ?? 'none'}`
 const hydrateCart = (payload, products) => cartRecords(payload).flatMap((record) => {
-  const productId = record.product_id ?? record.productId ?? record.product?.id
+  const productId = record.product_id ?? record.productId ?? record.product?.id ?? record.id
   const product = products.find((candidate) => String(candidate.id) === String(productId))
   if (!product) return []
   const productColorId = record.product_color_id ?? record.productColorId ?? null
@@ -193,6 +217,7 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [footerFeature, setFooterFeature] = useState(null)
+  const syncingGuestCart = useRef(false)
 
   useEffect(() => removeLegacyUserCarts(), [])
 
@@ -205,7 +230,7 @@ function App() {
   useEffect(() => {
     const expireSession = () => {
       setUser(null)
-      setCart([])
+      setCart(savedGuestCart())
       setCheckoutMode('guest')
       setToast('Your session expired. Please sign in again.')
     }
@@ -274,8 +299,51 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!user) sessionStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart))
+    if (user) return
+    if (syncingGuestCart.current) {
+      syncingGuestCart.current = false
+      return
+    }
+    localStorage.setItem(getGuestCartStorageKey(), JSON.stringify({ items: cart, updatedAt: Date.now() }))
   }, [cart, user])
+
+  useEffect(() => {
+    if (user || cart.length === 0) return undefined
+    const storageKey = getGuestCartStorageKey()
+    const timer = window.setTimeout(() => {
+      localStorage.removeItem(storageKey)
+      setCart([])
+      setToast('Your guest cart expired after 10 minutes of inactivity.')
+    }, GUEST_CART_TTL_MS)
+    return () => window.clearTimeout(timer)
+  }, [cart, user])
+
+  useEffect(() => {
+    if (user || products.length === 0) return undefined
+    const frame = window.requestAnimationFrame(() => setCart((current) => hydrateCart(current, products)))
+    return () => window.cancelAnimationFrame(frame)
+  }, [products, user])
+
+  useEffect(() => {
+    if (user) return undefined
+    const storageKey = getGuestCartStorageKey()
+    const syncGuestCart = (event) => {
+      if (event.key !== storageKey) return
+      try {
+        syncingGuestCart.current = true
+        if (!event.newValue) {
+          setCart([])
+          return
+        }
+        const saved = parseGuestCart(event.newValue)
+        setCart(Date.now() - saved.updatedAt < GUEST_CART_TTL_MS ? saved.items : [])
+      } catch {
+        setCart([])
+      }
+    }
+    window.addEventListener('storage', syncGuestCart)
+    return () => window.removeEventListener('storage', syncGuestCart)
+  }, [user])
 
   useEffect(() => {
     if (!user?.id || products.length === 0) return undefined
@@ -413,7 +481,6 @@ function App() {
   }
   const login = (session) => {
     saveSession(session)
-    sessionStorage.removeItem(GUEST_CART_KEY)
     setCart([])
     setUser(session.user)
     setCheckoutMode('customer')
@@ -430,7 +497,7 @@ function App() {
     }
     startGuestSession()
     setUser(null)
-    setCart([])
+    setCart(savedGuestCart())
     setConfirmed(false)
     setCheckoutMode('guest')
     go('shop')
@@ -442,10 +509,10 @@ function App() {
     setConfirmationReference(pending || null)
     setConfirmed(true)
     setCart([])
-    sessionStorage.removeItem(GUEST_CART_KEY)
+    if (!user) localStorage.removeItem(getGuestCartStorageKey())
     sessionStorage.removeItem(pendingStripeOrderKey(user?.id || 'guest'))
     if (user?.id) cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
-  }, [user?.id])
+  }, [user])
 
   return (
     <div className="app-shell">
@@ -467,6 +534,7 @@ function App() {
           <button className="icon-button bag-button" onClick={() => setCartOpen(true)} aria-label={`Shopping bag with ${count} items`}><Icon name="bag"/><b>{count}</b></button>
         </div>
       </header>
+      {['home', 'shop', 'team', 'track'].includes(view) && <div className="launch-banner" role="status" aria-label={LAUNCH_SPECIAL_MESSAGE}><div className="launch-banner-track"><span>{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span></div></div>}
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setView('shop') }} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
       {(view === 'home' || view === 'shop' || view === 'team') && <Shop mode={view} products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
@@ -485,7 +553,7 @@ function App() {
 
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => isLoggedIn ? go('checkout') : (setCartOpen(false), setLoginOpen(true))} /></>}
       {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><Login close={() => { startGuestSession(); setLoginOpen(false) }} success={login} continueAsGuest={() => { startGuestSession(); setLoginOpen(false); setCheckoutMode('guest'); if (cart.length) go('checkout') }} /></>}
-      {faqOpen && <><div className="faq-scrim" onClick={() => setFaqOpen(false)}/><section className="faq-modal" role="dialog" aria-modal="true" aria-labelledby="faq-heading"><header><div><span className="eyebrow">Here to help</span><h2 id="faq-heading">Frequently asked questions</h2><p>Everything you need to know about shopping with Shilp &amp; Soul.</p></div><button type="button" className="icon-button" onClick={() => setFaqOpen(false)} aria-label="Close FAQs"><Icon name="close"/></button></header><div className="faq-list"><details open><summary>What kind of products does Shilp &amp; Soul offer?</summary><p>We curate Indian-made wall decorations, hand-painted dining pieces, devotional décor, embroidered potli bags, clutches, handbags, shirts and kurtis. The collection includes Bandhej, Patola, Laharia, gota, zari, brocade, carved wood and painted craft traditions.</p></details><details><summary>Are handmade pieces exactly identical?</summary><p>No. Small variations in colour, weave, embroidery, carving and painted detail are part of handmade production. They make each piece individual without affecting its intended use or quality.</p></details><details><summary>How much does delivery cost?</summary><p>Delivery is complimentary when your merchandise subtotal is S$150 or more. A delivery charge of S$8 applies below that amount and is shown before you place the order.</p></details><details><summary>Can I place an order without creating an account?</summary><p>Yes. Guest checkout is available when the store is live. You will need to verify your selected email or SMS destination before placing the order.</p></details><details><summary>Which payment methods are accepted?</summary><p>Online checkout is securely handled by Stripe and currently supports cards and PayNow when available. Stripe may request an email address for its payment confirmation even when your store updates are sent by SMS.</p></details><details><summary>How will I receive order updates?</summary><p>You can select email or SMS. Registered customers use a verified contact saved to their account; guests confirm the selected destination during checkout.</p></details><details><summary>How can I track my order?</summary><p>Customers can sign in and open “My orders.” Guests can select “Track order” and enter the order number plus the email address, SMS number used at checkout.</p></details><details><summary>Can I cancel an order?</summary><p>A cancellation request can be raised while an order is pending, confirmed or processing. Requests are sent to the seller for review and are not automatically approved.</p></details><details><summary>Can I return an item?</summary><p>Eligible delivered items can be submitted for return review from your order details. The applicable return window is associated with the order, and the seller reviews each request before approval.</p></details><details><summary>What if the product I want is not listed?</summary><p>Search through the Shilp assistant. If no matching item is found, registered customers can share a product request with our buying and support team for personalised assistance.</p></details><details><summary>Why are some products available only in small quantities?</summary><p>Many pieces are sourced or produced in small batches. Stock shown on each product, including available colour quantities, reflects the current product master and may be limited.</p></details></div></section></>}
+      {faqOpen && <><div className="faq-scrim" onClick={() => setFaqOpen(false)}/><section className="faq-modal" role="dialog" aria-modal="true" aria-labelledby="faq-heading"><header><div><span className="eyebrow">Here to help</span><h2 id="faq-heading">Frequently asked questions</h2><p>Everything you need to know about shopping with Shilp &amp; Soul.</p></div><button type="button" className="icon-button" onClick={() => setFaqOpen(false)} aria-label="Close FAQs"><Icon name="close"/></button></header><div className="faq-list"><details open><summary>What kind of products does Shilp &amp; Soul offer?</summary><p>We curate Indian-made wall decorations, hand-painted dining pieces, devotional décor, embroidered potli bags, clutches, handbags, shirts and kurtis. The collection includes Bandhej, Patola, Laharia, gota, zari, brocade, carved wood and painted craft traditions.</p></details><details><summary>Are handmade pieces exactly identical?</summary><p>No. Small variations in colour, weave, embroidery, carving and painted detail are part of handmade production. They make each piece individual without affecting its intended use or quality.</p></details><details><summary>How much does delivery cost?</summary><p>Delivery is complimentary when your merchandise subtotal is S$30 or more. A delivery charge of S$5 applies below that amount and is shown before you place the order.</p></details><details><summary>Can I place an order without creating an account?</summary><p>Yes. Guest checkout is available when the store is live. You will need to verify your selected email or SMS destination before placing the order.</p></details><details><summary>Which payment methods are accepted?</summary><p>Online checkout is securely handled by Stripe and currently supports cards and PayNow when available. Stripe may request an email address for its payment confirmation even when your store updates are sent by SMS.</p></details><details><summary>How will I receive order updates?</summary><p>You can select email or SMS. Registered customers use a verified contact saved to their account; guests confirm the selected destination during checkout.</p></details><details><summary>How can I track my order?</summary><p>Customers can sign in and open “My orders.” Guests can select “Track order” and enter the order number plus the email address, SMS number used at checkout.</p></details><details><summary>Can I cancel an order?</summary><p>A cancellation request can be raised while an order is pending, confirmed or processing. Requests are sent to the seller for review and are not automatically approved.</p></details><details><summary>Can I return an item?</summary><p>Eligible delivered items can be submitted for return review from your order details. The applicable return window is associated with the order, and the seller reviews each request before approval.</p></details><details><summary>What if the product I want is not listed?</summary><p>Search through the Shilp assistant. If no matching item is found, registered customers can share a product request with our buying and support team for personalised assistance.</p></details><details><summary>Why are some products available only in small quantities?</summary><p>Many pieces are sourced or produced in small batches. Stock shown on each product, including available colour quantities, reflects the current product master and may be limited.</p></details></div></section></>}
       {contactOpen && <ContactModal close={() => setContactOpen(false)} user={user} />}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
       {view !== 'requirements-admin' && <ShopAssistant products={products} categories={categories} user={user} onSignIn={() => setLoginOpen(true)} />}
@@ -577,21 +645,16 @@ function Shop({ mode, products, categories, banners, loading, error, cart, addTo
   const changeProductPage = (page) => {
     setProductPage(page)
     setShowAllProducts(false)
-    window.requestAnimationFrame(() => document.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth' }))
   }
   const viewAllProducts = () => {
     setCategoryId('all')
     setOrigin('all')
     setProductPage(1)
     setShowAllProducts(true)
-    showProducts()
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      document.querySelector('.product-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }))
   }
 
   return <main>
-    {mode === 'home' && !normalizedSearch && <><section className={`hero-section${activeStory ? ' story-active' : ''}`}>
+    {mode === 'home' && !normalizedSearch && <><section className={`hero-section${activeStory ? ' story-active' : ''}${!activeStory && heroSource === 'product' ? ' hero-product-active' : ''}`}>
       <div className="hero-copy"><span className="eyebrow">{activeStory?.eyebrow || 'Handmade for the everyday'}</span><h1>{activeStory?.heading || <>Live with things<br/><em>that have a soul.</em></>}</h1><p>{activeStory?.text || 'Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.'}</p><button className="primary" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div>
       <div className="hero-art">{displayedHero ? <OptimizedImage className="hero-image" src={displayedHero.image} alt={activeStory ? `${activeStory.title}, Shilp & Soul craft story` : heroSlide?.alt || 'Handcrafted home decor'} priority width={1200} height={675} sizes="(max-width: 850px) 100vw, 52vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/> : <div className="hero-image" role="img" aria-label="Handcrafted home decor"/>}<div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={!activeStory && heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={!activeStory && heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div>{!activeStory && <div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div>}<div className="maker-note"><span>{activeStory ? `Our story · ${activeStory.number}` : heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{activeStory?.title || heroSlide?.label || (heroSource === 'banner' ? 'No active banners' : 'Objects made with care')}</strong><button aria-label="Open Shop" onClick={showProducts}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
     </section>
@@ -609,6 +672,7 @@ function Shop({ mode, products, categories, banners, loading, error, cart, addTo
       {error && <div className="catalog-status error" role="alert">{error}</div>}
       {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">{normalizedSearch ? `No products match “${searchQuery.trim()}”.` : origin !== 'all' ? 'No pieces match the selected category and place of origin.' : 'No pieces are available in this category yet.'}</div>}
       <div className="product-grid">{pagedProducts.map((product) => <ProductCard product={product} cartEntries={cart.filter((item) => item.id === product.id)} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} key={product.id} />)}</div>
+      {!showAllProducts && pageCount > 1 && <nav className="product-pagination product-pagination-bottom" aria-label="Product pages after products"><button type="button" disabled={currentPage === 1} onClick={() => changeProductPage(currentPage - 1)} aria-label="Previous product page">‹</button>{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" className={page === currentPage ? 'selected' : ''} aria-current={page === currentPage ? 'page' : undefined} onClick={() => changeProductPage(page)} key={page}>{page}</button>)}<button type="button" disabled={currentPage === pageCount} onClick={() => changeProductPage(currentPage + 1)} aria-label="Next product page">›</button></nav>}
     </section>}
     {mode === 'team' && <section className={`craft-callout${footerFeature ? ` showing-${footerFeature}` : ''}`}>{footerFeature === 'story' ? <><OptimizedImage className="our-story-image editorial-image" src="/story-artisan-made.png" alt="Indian craft traditions represented through handmade objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our story</span><h2>A small window into India’s<br/><em>living craft traditions.</em></h2><p>Shilp &amp; Soul shares India’s rich cultural imagination through objects made to be lived with. Our collection moves from Bandhej, Patola and Laharia clutches to gota, zari and thread-embroidered potli bags, each carrying the colour and rhythm of regional textile traditions. Hand-painted trays, peacock serving boxes and carved wall frames bring the warmth of Indian woodcraft to the table and home. Radha-Krishna décor and small ceremonial asans reflect the quiet place of devotion in everyday life, while expressive shirts and kurtis carry craft into the wardrobe. Every piece connects contemporary living with skills, symbols and stories shaped across generations.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'artisans' ? <><OptimizedImage className="artisans-image editorial-image" src="/story-made-to-last.png" alt="Artisan working on traditional carved wall decoration" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our artisans</span><h2>Carved by hand.<br/><em>Alive with meaning.</em></h2><p>Behind our wall decorations are artisans who understand wood as both material and memory. Floral round frames are patiently carved to create depth through light and shadow; rectangular and triangular hanging sets are balanced, finished and assembled by hand. Radha-Krishna pieces bring devotional imagery into the home, where art and everyday worship have long lived together. The same eye for proportion and painted detail shapes our peacock serving boxes and wooden trays. Tool marks, subtle variations and the warmth of the grain are not imperfections—they are the maker’s presence, giving every Shilp &amp; Soul piece its individual character.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'journal' ? <><OptimizedImage className="journal-image editorial-image" src="/story-small-batch.png" alt="A curated collection of handmade Indian objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div className="journal-panel"><span className="eyebrow">The collection journal</span><h2>Objects, materials<br/>and their stories.</h2><div className="journal-product-list">{products.map((product) => { const description = product.product_description?.catalogue_description || product.description || product.craft || 'A thoughtfully selected piece shaped by Indian craft traditions.'; return <article key={product.id}><span>{product.sku || product.product_code || 'Shilp & Soul'}</span><h3>{product.name}</h3><p>{description}</p></article> })}{products.length === 0 && <p className="journal-empty">Our product stories are being prepared.</p>}<button className="text-link journal-explore" onClick={showProducts}>Explore our collection <Icon name="arrow" size={18}/></button></div></div></> : <><OptimizedImage className="makers-image editorial-image" src="/meet-our-makers.png" alt="Young makers arranging Indian handcrafted products" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Meet our makers</span><h2>Young perspectives.<br/><em>India at heart.</em></h2><p>Our makers bring a contemporary eye to the visual languages they grew up around. Their taste is shaped by the geometry of Patola, the movement of Laharia, the dotted rhythm of Bandhej and the glow of gota and zari. They pair embroidered potlis and clutches with carved wall frames, painted trays and devotional motifs—not as pieces frozen in the past, but as living expressions of Indian culture. Through colour, texture and thoughtful composition, they imagine how inherited craft can belong naturally in today’s wardrobe and home. Each choice is an invitation to discover heritage with curiosity, confidence and personal style.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></>}</section>}
   </main>
@@ -686,12 +750,12 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
 function CartDrawer({ cart, total, updateQuantity, close, checkout }) {
   return <aside className="cart-drawer" aria-label="Shopping bag"><div className="drawer-head"><div><span className="eyebrow">Your selection</span><h2>Shopping bag <small>{cart.length}</small></h2></div><button className="icon-button" onClick={close} aria-label="Close bag"><Icon name="close"/></button></div>
     <div className="cart-items">{cart.length === 0 ? <div className="empty"><Icon name="bag" size={35}/><h3>Your bag is empty</h3><p>Beautiful things are waiting.</p></div> : cart.map((item) => <div className="cart-item" key={cartLineKey(item)}><OptimizedImage src={item.image} alt="" loading="lazy" width={88} height={102} sizes="88px"/><div className="cart-info"><h3>{item.name}</h3><p>{item.craft}</p>{item.color && <p className="cart-color"><b>Colour</b> {item.color}</p>}<div className="quantity"><button onClick={() => updateQuantity(cartLineKey(item), -1)} aria-label="Decrease quantity"><Icon name="minus" size={14}/></button><span>{item.quantity}</span><button onClick={() => updateQuantity(cartLineKey(item), 1)} aria-label="Increase quantity"><Icon name="plus" size={14}/></button></div></div><strong>S${item.price * item.quantity}</strong></div>)}</div>
-    <div className="drawer-bottom"><p className="delivery-note"><Icon name="check" size={15}/> Complimentary delivery over S$150</p><div className="subtotal"><span>Subtotal</span><strong>S${total.toFixed(2)}</strong></div><small>Taxes included. Shipping calculated at checkout.</small><button className="primary full" disabled={!cart.length} onClick={checkout}>Continue to checkout <Icon name="arrow" size={18}/></button><button className="continue" onClick={close}>Continue shopping</button></div>
+    <div className="drawer-bottom"><p className="delivery-note"><Icon name="check" size={15}/> {LAUNCH_SPECIAL_MESSAGE}</p><div className="subtotal"><span>Subtotal</span><strong>S${total.toFixed(2)}</strong></div><small>Taxes included. Shipping calculated at checkout.</small><button className="primary full" disabled={!cart.length} onClick={checkout}>Continue to checkout <Icon name="arrow" size={18}/></button><button className="continue" onClick={close}>Continue shopping</button></div>
   </aside>
 }
 
 function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, confirmed, confirmationReference, go }) {
-  const delivery = total >= 150 ? 0 : 8
+  const delivery = deliveryChargeFor(total)
   const orderTotal = total + delivery
   const customerName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email || 'Customer'
   const [paymentError, setPaymentError] = useState('')
@@ -857,6 +921,7 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
     return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">{paid?'Order confirmed':'Confirming payment'}</span><h1>{paid?'Thank you for choosing':'Please wait while we confirm'}<br/><em>{paid?'handmade.':'your payment.'}</em></h1><p>{paid?`Your order has been received. We’ll send the details and delivery updates by ${channel}.`:'Your reserved items are held briefly while Stripe confirms payment.'}</p>{paid&&canShowOrderReference&&confirmedOrder?.order_number&&<div className="order-number"><span>Order number</span><strong>{confirmedOrder.order_number}</strong><button onClick={() => navigator.clipboard.writeText(confirmedOrder.order_number)}>Copy</button></div>}{paid&&!canShowOrderReference&&<p className="verification-note">Sign in to view this customer order in My orders.</p>}{confirmationError && <p className="payment-error" role="alert">{confirmationError}</p>}<div className="confirmation-actions"><button className="primary" onClick={() => paid ? go('shop') : window.location.reload()}>{paid?'Continue shopping':'Check again'}</button>{paid&&canShowOrderReference&&<button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button>}</div></main>
   }
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
+    <div className="launch-banner checkout-launch-special" role="status" aria-label={LAUNCH_SPECIAL_MESSAGE}><div className="launch-banner-track"><span>{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span></div></div>
     <div className="checkout-layout"><section className="checkout-form"><div className="mode-tabs"><button className={mode === 'guest' ? 'active' : ''} disabled={isLoggedIn || !GUEST_CHECKOUT_ENABLED} onClick={() => setMode('guest')}><span>Guest checkout</span><small>{!GUEST_CHECKOUT_ENABLED ? 'Guest checkout is unavailable' : isLoggedIn ? 'Unavailable while signed in' : 'Quick, no account needed'}</small></button><button className={mode === 'customer' ? 'active' : ''} disabled={!isLoggedIn} onClick={() => setMode('customer')}><span>{isLoggedIn ? customerName : 'Customer checkout'}</span><small>{isLoggedIn ? 'Checkout with saved details' : 'Sign in to use customer checkout'}</small></button></div>
       <form key={`${mode}-${user?.id || 'guest'}`} onSubmit={submitCheckout}><h2>{mode === 'guest' ? 'Where should we send it?' : 'Confirm your delivery details'}</h2><div className="field-grid"><label>Full name<input required name="name" defaultValue={isLoggedIn && mode === 'customer' ? customerName : ''} placeholder="Your full name"/></label><label>Email address *<input required name="email" type="email" value={checkoutEmail} onChange={changeCheckoutEmail} placeholder="you@example.com"/></label><label>SMS phone{notificationChannel === 'SMS' ? ' *' : ' (optional)'}<input required={notificationChannel === 'SMS'} name="phone" type="tel" value={checkoutPhone} onChange={changeCheckoutPhone} placeholder="+6591234567" title="Use international E.164 format, for example +6591234567" aria-invalid={notificationChannel === 'SMS' && checkoutPhone.length > 0 && !smsNumberIsE164}/></label>{WHATSAPP_ENABLED && <label>WhatsApp{notificationChannel === 'WHATSAPP' ? ' *' : ' (optional)'}<input required={notificationChannel === 'WHATSAPP'} name="whatsapp" type="tel" value={checkoutWhatsapp} onChange={changeCheckoutWhatsapp} placeholder="+6591234567"/></label>}<label className="wide">Shipping address<textarea required name="shippingAddress" placeholder="Street, unit number, postal code"/></label></div>
         <section className="notification-confirmation" aria-labelledby="notification-heading"><div><span className="eyebrow">Order notifications</span><h2 id="notification-heading">Confirm where we should send updates</h2></div><div className="notification-channels" role="radiogroup" aria-label="Notification channel"><label className={notificationChannel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="notificationChannel" checked={notificationChannel === 'EMAIL'} onChange={() => chooseNotificationChannel('EMAIL')}/> Email</label>{WHATSAPP_ENABLED && <label className={notificationChannel === 'WHATSAPP' ? 'selected' : ''} aria-disabled={!whatsappChannelAvailable}><input type="radio" name="notificationChannel" checked={notificationChannel === 'WHATSAPP'} disabled={!whatsappChannelAvailable} onChange={() => chooseNotificationChannel('WHATSAPP')}/> WhatsApp</label>}<label className={notificationChannel === 'SMS' ? 'selected' : ''} aria-disabled={!smsChannelAvailable}><input type="radio" name="notificationChannel" checked={notificationChannel === 'SMS'} disabled={!smsChannelAvailable} onChange={() => chooseNotificationChannel('SMS')}/> SMS</label></div>{!smsChannelAvailable&&<p className="verification-note">Enter an SMS number to enable SMS verification.</p>}{accountNotificationConfirmed ? <p className="verification-success"><Icon name="check" size={15}/> Your selected account contact is already verified.</p> : verificationToken ? <p className="verification-success"><Icon name="check" size={15}/> Checkout contact confirmed.</p> : <><button className="secondary" type="button" onClick={requestCheckoutCode} disabled={verificationBusy}>{verificationId ? 'Resend code' : 'Send verification code'}</button>{verificationId && <div className="otp-entry"><label>Six-digit code<input inputMode="numeric" maxLength="6" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="secondary" type="button" disabled={verificationBusy || verificationCode.length !== 6} onClick={confirmCheckoutCode}>Confirm {notificationChannelName}</button></div>}</>}{verificationMessage && <p className="verification-note" role="status">{verificationMessage}</p>}</section>
@@ -867,7 +932,10 @@ function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, con
   </main>
 }
 
-function OrderSummary({ cart, total }) { return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map(item => <div className="summary-item" key={cartLineKey(item)}><div><OptimizedImage src={item.image} alt="" loading="lazy" width={88} height={102} sizes="88px"/><b>{item.quantity}</b></div><p><strong>{item.name}</strong><span>{item.craft}{item.color ? ` · ${item.color}` : ''}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<div className="summary-lines"><p><span>Subtotal</span><b>S${total.toFixed(2)}</b></p><p><span>Delivery</span><b>{total >= 150 ? 'Complimentary' : 'S$8.00'}</b></p></div><div className="summary-total"><span>Total <small>SGD</small></span><strong>S${(total + (total >= 150 ? 0 : 8)).toFixed(2)}</strong></div></aside> }
+function OrderSummary({ cart, total }) {
+  const delivery = deliveryChargeFor(total)
+  return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map(item => <div className="summary-item" key={cartLineKey(item)}><div><OptimizedImage src={item.image} alt="" loading="lazy" width={88} height={102} sizes="88px"/><b>{item.quantity}</b></div><p><strong>{item.name}</strong><span>{item.craft}{item.color ? ` · ${item.color}` : ''}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<p className="checkout-promotion"><Icon name="check" size={15}/> {LAUNCH_SPECIAL_MESSAGE}</p><div className="summary-lines"><p><span>Subtotal</span><b>S${total.toFixed(2)}</b></p><p><span>Delivery</span><b>{delivery === 0 ? 'Complimentary' : `S$${delivery.toFixed(2)}`}</b></p></div><div className="summary-total"><span>Total <small>SGD</small></span><strong>S${(total + delivery).toFixed(2)}</strong></div></aside>
+}
 
 function Login({ close, success, continueAsGuest }) {
   const [registering, setRegistering] = useState(false)
@@ -1156,7 +1224,7 @@ function ShopAssistant({ products, categories, user, onSignIn }) {
 
   const answer = (question) => {
     const query = question.toLowerCase().trim()
-    if (/shipping|delivery|return/.test(query)) return 'Delivery is complimentary for orders over S$150; otherwise it is S$8. Shipping is calculated at checkout. For return help, please use Contact us in the footer.'
+    if (/shipping|delivery|return/.test(query)) return 'Delivery is complimentary for merchandise subtotals of S$30 or more; otherwise it is S$5. Shipping is calculated at checkout. For return help, please use Contact us in the footer.'
     if (/site|about|who are|shilp|artisan|handmade/.test(query)) return 'Shilp & Soul curates thoughtful, handmade objects from artisans across India—pieces made slowly and chosen for everyday life.'
     if (/order|track/.test(query)) return user ? 'Open “My orders” in the header to see your order history and status.' : 'Choose “Track order” in the header and enter your order number and checkout email.'
     const terms = query.split(/\W+/).filter((term) => term.length > 2 && !['have', 'show', 'find', 'looking', 'want', 'need', 'product'].includes(term))

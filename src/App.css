@@ -86,3 +86,8 @@
 .gallery-visual .lightbox-main{padding:clamp(28px,4vw,52px);overflow:hidden;background:#f3f0e8}
 .gallery-visual .gallery-thumbnails button{overflow:hidden}
 @media(max-width:850px){.gallery-visual .lightbox-main{padding:18px}}
+.launch-banner{overflow:hidden;background:#b75638;color:#fff;border-bottom:1px solid #9f472e}.launch-banner-track{display:flex;width:max-content;animation:launch-banner-scroll 24s linear infinite}.launch-banner-track span{flex:none;padding:10px 4rem;font-size:11px;font-weight:600;letter-spacing:1.1px;text-transform:uppercase;white-space:nowrap}.launch-banner-track span::after{content:'✦';margin-left:4rem;color:#f2d0bd}@keyframes launch-banner-scroll{to{transform:translateX(-25%)}}.delivery-note{display:flex;align-items:center;gap:7px}.checkout-promotion{display:flex;align-items:flex-start;gap:7px;margin:18px 0 12px;padding:12px 0;border-bottom:1px solid #d8d2c7;color:#385743;font-size:10px;line-height:1.5}.checkout-promotion svg{flex:none}@media(prefers-reduced-motion:reduce){.launch-banner-track{width:100%;animation:none;justify-content:center}.launch-banner-track span:not(:first-child){display:none}}
+.checkout-launch-special{max-width:1050px;margin:28px auto -18px;border-radius:2px;box-shadow:0 8px 22px #26382f1f}@media(max-width:850px){.checkout-launch-special{margin:24px auto -22px}}
+.hero-product-active .hero-image{object-fit:contain;object-position:center;padding:24px;background:#e9e3d5;box-sizing:border-box}@media(max-width:850px){.hero-product-active .hero-image{padding:14px}}
+.app-shell{overflow-x:clip;overflow-y:visible}
+.product-pagination-bottom{justify-content:center;margin:42px auto 0;padding:8px 0;max-width:100%;overflow-x:auto}

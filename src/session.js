@@ -1,6 +1,7 @@
 const TOKEN_KEY = 'authToken'
 const USER_KEY = 'authUser'
 const MODE_KEY = 'sessionMode'
+const GUEST_SESSION_KEY = 'guestSessionId'
 
 export const SESSION_MODE = Object.freeze({ GUEST: 'guest', USER: 'user' })
 
@@ -19,8 +20,22 @@ const removeUserCredentials = () => {
   localStorage.removeItem(USER_KEY)
 }
 
+const createGuestSessionId = () => globalThis.crypto?.randomUUID?.() || `guest-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+export const getGuestSessionId = () => {
+  let guestSessionId = localStorage.getItem(GUEST_SESSION_KEY)
+  if (!guestSessionId) {
+    guestSessionId = createGuestSessionId()
+    localStorage.setItem(GUEST_SESSION_KEY, guestSessionId)
+  }
+  return guestSessionId
+}
+
+export const getGuestCartStorageKey = () => `shoppingCart:guest:${getGuestSessionId()}`
+
 export const startGuestSession = () => {
   removeUserCredentials()
+  getGuestSessionId()
   localStorage.setItem(MODE_KEY, SESSION_MODE.GUEST)
 }
 
