@@ -522,7 +522,7 @@ function App() {
         <nav aria-label="Main navigation">
           <button className={view === 'home' ? 'active' : ''} onClick={() => go('home')}>Home</button>
           <button className={view === 'shop' ? 'active' : ''} onClick={() => go('shop')}>Shop</button>
-          <button onClick={showProducts}>New arrivals</button>
+          <button onClick={() => go('shop')}>New arrivals</button>
           <button className={view === 'team' ? 'active' : ''} onClick={() => { setFooterFeature('makers'); go('team') }}>Soul Team</button>
           {!isLoggedIn && <button onClick={() => go('track')}>Track order</button>}
           {isLoggedIn && <button onClick={() => go('orders')}>My orders</button>}
