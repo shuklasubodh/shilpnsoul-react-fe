@@ -498,8 +498,8 @@ function App() {
     setCart(savedGuestCart())
     setConfirmed(false)
     setCheckoutMode('guest')
-    go('shop')
-    setLoginOpen(true)
+    go('home')
+    setLoginOpen(false)
     setToast('')
   }
 

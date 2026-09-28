@@ -16,6 +16,8 @@ const decodeClaims = (token) => {
 }
 
 const removeUserCredentials = () => {
+  sessionStorage.removeItem(TOKEN_KEY)
+  sessionStorage.removeItem(USER_KEY)
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
 }
@@ -36,33 +38,33 @@ export const getGuestCartStorageKey = () => `shoppingCart:guest:${getGuestSessio
 export const startGuestSession = () => {
   removeUserCredentials()
   getGuestSessionId()
-  localStorage.setItem(MODE_KEY, SESSION_MODE.GUEST)
+  sessionStorage.setItem(MODE_KEY, SESSION_MODE.GUEST)
 }
 
 export const clearSession = startGuestSession
 
 export const getSessionToken = () => {
-  const mode = localStorage.getItem(MODE_KEY)
+  const mode = sessionStorage.getItem(MODE_KEY)
   if (mode === SESSION_MODE.GUEST) {
     removeUserCredentials()
     return null
   }
 
-  const token = localStorage.getItem(TOKEN_KEY)
+  const token = sessionStorage.getItem(TOKEN_KEY)
   const claims = token && decodeClaims(token)
   if (!claims?.exp || claims.exp * 1000 <= Date.now()) {
     startGuestSession()
     return null
   }
 
-  localStorage.setItem(MODE_KEY, SESSION_MODE.USER)
+  sessionStorage.setItem(MODE_KEY, SESSION_MODE.USER)
   return token
 }
 
 export const getSessionUser = () => {
   if (!getSessionToken()) return null
   try {
-    const user = JSON.parse(localStorage.getItem(USER_KEY))
+    const user = JSON.parse(sessionStorage.getItem(USER_KEY))
     if (!user) throw new Error('Missing session user')
     return user
   } catch {
@@ -76,7 +78,7 @@ export const saveSession = ({ token, user }) => {
   if (!user || !claims?.exp || claims.exp * 1000 <= Date.now()) throw new Error('The server returned an invalid session.')
 
   removeUserCredentials()
-  localStorage.setItem(TOKEN_KEY, token)
-  localStorage.setItem(USER_KEY, JSON.stringify(user))
-  localStorage.setItem(MODE_KEY, SESSION_MODE.USER)
+  sessionStorage.setItem(TOKEN_KEY, token)
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user))
+  sessionStorage.setItem(MODE_KEY, SESSION_MODE.USER)
 }
