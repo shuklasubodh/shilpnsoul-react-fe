@@ -3,7 +3,6 @@ import './App.css'
 import './Contact.css'
 import { authApi, cartApi, catalogApi, contactApi, marketingApi, marketRequirementApi, orderApi, paymentApi } from './api'
 import { getGuestCartStorageKey, getSessionUser, saveSession, startGuestSession } from './session'
-import productImageManifest from './product-image-manifest.json'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
 const GUEST_CHECKOUT_ENABLED = import.meta.env.VITE_GUEST_CHECKOUT_ENABLED === 'true'
@@ -59,7 +58,6 @@ const editorialBase = (url) => {
 
 function OptimizedImage({ src, alt, className, loading = 'lazy', width, height, sizes = '100vw', priority = false, onError }) {
   const base = editorialBase(src)
-  const localProduct = productImageManifest[src]
   const handleError = (event) => {
     const image = event.currentTarget
     if (image.dataset.fallbackStage === 'placeholder') return
@@ -75,12 +73,10 @@ function OptimizedImage({ src, alt, className, loading = 'lazy', width, height, 
     onError?.(event)
   }
   if (base) return <picture className={className ? `${className.split(' ')[0]}-picture` : undefined}><source type="image/avif" srcSet={`/${base}-720.avif 720w, /${base}-1200.avif 1200w`} sizes={sizes}/><source type="image/webp" srcSet={`/${base}-720.webp 720w, /${base}-1200.webp 1200w`} sizes={sizes}/><img className={className} src={`/${base}-1200.webp`} alt={alt} loading={priority ? 'eager' : loading} fetchPriority={priority ? 'high' : 'auto'} decoding="async" width={width} height={height} onError={handleError}/></picture>
-  const remoteMobile = !localProduct && mobileProductImage(src, width > 720 ? 960 : 480)
-  const optimized = localProduct ? `${localProduct}-${width > 720 ? 960 : 480}.webp` : remoteMobile || optimizeRemoteImage(src, width || 800)
-  const supportsVariants = Boolean(localProduct || remoteMobile) || optimized !== src
-  const srcSet = localProduct
-    ? `${localProduct}-480.webp 480w, ${localProduct}-960.webp 960w`
-    : remoteMobile ? `${mobileProductImage(src, 480)} 480w, ${mobileProductImage(src, 960)} 960w`
+  const remoteMobile = mobileProductImage(src, width > 720 ? 960 : 480)
+  const optimized = remoteMobile || optimizeRemoteImage(src, width || 800)
+  const supportsVariants = Boolean(remoteMobile) || optimized !== src
+  const srcSet = remoteMobile ? `${mobileProductImage(src, 480)} 480w, ${mobileProductImage(src, 960)} 960w`
     : supportsVariants ? [480, 800, 1200].map((candidate) => `${optimizeRemoteImage(src, candidate)} ${candidate}w`).join(', ') : undefined
   return <img className={className} src={optimized} srcSet={srcSet} sizes={supportsVariants ? sizes : undefined} alt={alt} loading={priority ? 'eager' : loading} fetchPriority={priority ? 'high' : 'auto'} decoding="async" width={width} height={height} onError={handleError}/>
 }
@@ -604,9 +600,7 @@ function Shop({ mode, products, categories, banners, loading, error, cart, addTo
       if (!next?.image) return
       const image = new Image()
       image.decoding = 'async'
-      image.src = productImageManifest[next.image]
-        ? `${productImageManifest[next.image]}-960.webp`
-        : mobileProductImage(next.image, 960) || optimizeRemoteImage(next.image, 1200)
+      image.src = mobileProductImage(next.image, 960) || optimizeRemoteImage(next.image, 1200)
     }
     if ('requestIdleCallback' in window) {
       const idleId = window.requestIdleCallback(preloadNext, { timeout: 2500 })
