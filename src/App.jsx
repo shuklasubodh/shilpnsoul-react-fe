@@ -3,6 +3,8 @@ import './App.css'
 import './Contact.css'
 import { authApi, cartApi, catalogApi, contactApi, marketingApi, marketRequirementApi, orderApi, paymentApi } from './api'
 import { getGuestCartStorageKey, getSessionUser, saveSession, startGuestSession } from './session'
+import AccountAccess from './AccountAccess'
+import CheckoutV2 from './CheckoutV2'
 
 const FALLBACK_IMAGE = '/product-placeholder.svg'
 const GUEST_CHECKOUT_ENABLED = import.meta.env.VITE_GUEST_CHECKOUT_ENABLED === 'true'
@@ -195,7 +197,7 @@ const Icon = ({ name, size = 20 }) => {
 function App() {
   const [view, setView] = useState(initialView)
   const [cartOpen, setCartOpen] = useState(false)
-  const [loginOpen, setLoginOpen] = useState(false)
+  const [loginOpen, setLoginOpen] = useState(() => Boolean(new URLSearchParams(window.location.search).get('invitation')))
   const [faqOpen, setFaqOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const [user, setUser] = useState(getSessionUser)
@@ -532,7 +534,7 @@ function App() {
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setView('shop') }} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
       {(view === 'home' || view === 'shop' || view === 'team') && <Shop mode={view} products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
-      {view === 'checkout' && <Checkout cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} />}
+      {view === 'checkout' && <CheckoutV2 cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} onSignIn={() => setLoginOpen(true)} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
       {view === 'orders' && <Orders products={products} />}
@@ -546,7 +548,7 @@ function App() {
       </footer>
 
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => isLoggedIn ? go('checkout') : (setCartOpen(false), setLoginOpen(true))} /></>}
-      {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><Login close={() => { startGuestSession(); setLoginOpen(false) }} success={login} continueAsGuest={() => { startGuestSession(); setLoginOpen(false); setCheckoutMode('guest'); if (cart.length) go('checkout') }} /></>}
+      {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><AccountAccess close={() => { startGuestSession(); setLoginOpen(false) }} success={login} continueAsGuest={() => { startGuestSession(); setLoginOpen(false); setCheckoutMode('guest'); if (cart.length) go('checkout') }} /></>}
       {faqOpen && <><div className="faq-scrim" onClick={() => setFaqOpen(false)}/><section className="faq-modal" role="dialog" aria-modal="true" aria-labelledby="faq-heading"><header><div><span className="eyebrow">Here to help</span><h2 id="faq-heading">Frequently asked questions</h2><p>Everything you need to know about shopping with Shilp &amp; Soul.</p></div><button type="button" className="icon-button" onClick={() => setFaqOpen(false)} aria-label="Close FAQs"><Icon name="close"/></button></header><div className="faq-list"><details open><summary>What kind of products does Shilp &amp; Soul offer?</summary><p>We curate Indian-made wall decorations, hand-painted dining pieces, devotional décor, embroidered potli bags, clutches, handbags, shirts and kurtis. The collection includes Bandhej, Patola, Laharia, gota, zari, brocade, carved wood and painted craft traditions.</p></details><details><summary>Are handmade pieces exactly identical?</summary><p>No. Small variations in colour, weave, embroidery, carving and painted detail are part of handmade production. They make each piece individual without affecting its intended use or quality.</p></details><details><summary>How much does delivery cost?</summary><p>Delivery is complimentary when your merchandise subtotal is S$30 or more. A delivery charge of S$5 applies below that amount and is shown before you place the order.</p></details><details><summary>Can I place an order without creating an account?</summary><p>Yes. Guest checkout is available when the store is live. You will need to verify your selected email or SMS destination before placing the order.</p></details><details><summary>Which payment methods are accepted?</summary><p>Online checkout is securely handled by Stripe and currently supports cards and PayNow when available. Stripe may request an email address for its payment confirmation even when your store updates are sent by SMS.</p></details><details><summary>How will I receive order updates?</summary><p>You can select email or SMS. Registered customers use a verified contact saved to their account; guests confirm the selected destination during checkout.</p></details><details><summary>How can I track my order?</summary><p>Customers can sign in and open “My orders.” Guests can select “Track order” and enter the order number plus the email address, SMS number used at checkout.</p></details><details><summary>Can I cancel an order?</summary><p>A cancellation request can be raised while an order is pending, confirmed or processing. Requests are sent to the seller for review and are not automatically approved.</p></details><details><summary>Can I return an item?</summary><p>Eligible delivered items can be submitted for return review from your order details. The applicable return window is associated with the order, and the seller reviews each request before approval.</p></details><details><summary>What if the product I want is not listed?</summary><p>Search through the Shilp assistant. If no matching item is found, registered customers can share a product request with our buying and support team for personalised assistance.</p></details><details><summary>Why are some products available only in small quantities?</summary><p>Many pieces are sourced or produced in small batches. Stock shown on each product, including available colour quantities, reflects the current product master and may be limited.</p></details></div></section></>}
       {contactOpen && <ContactModal close={() => setContactOpen(false)} user={user} />}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
@@ -746,7 +748,7 @@ function CartDrawer({ cart, total, updateQuantity, close, checkout }) {
   </aside>
 }
 
-function Checkout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, confirmed, confirmationReference, go }) {
+export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, confirmed, confirmationReference, go }) {
   const delivery = deliveryChargeFor(total)
   const orderTotal = total + delivery
   const customerName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email || 'Customer'
@@ -929,7 +931,7 @@ function OrderSummary({ cart, total }) {
   return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map(item => <div className="summary-item" key={cartLineKey(item)}><div><OptimizedImage src={item.image} alt="" loading="lazy" width={88} height={102} sizes="88px"/><b>{item.quantity}</b></div><p><strong>{item.name}</strong><span>{item.craft}{item.color ? ` · ${item.color}` : ''}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<p className="checkout-promotion"><Icon name="check" size={15}/> {LAUNCH_SPECIAL_MESSAGE}</p><div className="summary-lines"><p><span>Subtotal</span><b>S${total.toFixed(2)}</b></p><p><span>Delivery</span><b>{delivery === 0 ? 'Complimentary' : `S$${delivery.toFixed(2)}`}</b></p></div><div className="summary-total"><span>Total <small>SGD</small></span><strong>S${(total + delivery).toFixed(2)}</strong></div></aside>
 }
 
-function Login({ close, success, continueAsGuest }) {
+export function LegacyLogin({ close, success, continueAsGuest }) {
   const [registering, setRegistering] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -1136,7 +1138,7 @@ function Orders({ products }) {
         <div className="order-detail-items">{(selectedOrder.items || []).map((item) => <div className="order-detail-item" key={item.id}><OptimizedImage src={productImage(item.product_id)} alt="" loading="lazy" width={88} height={102} sizes="88px"/><div><strong>{item.product_name}</strong><span>Quantity {item.quantity}{item.color ? ` · Colour ${item.color}` : ''}</span>{selectedOrder.status==='DELIVERED'&&<button className="secondary" type="button" onClick={()=>requestSelectedAction('RETURN',item)}>Return this item</button>}</div><b>S${Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)).toFixed(2)}</b></div>)}</div>
         <div className="order-detail-total"><span>Order total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div>
         {notificationMessage && <p className="order-notification-message" role="status">{notificationMessage}</p>}
-        <div className="order-history-actions"><button type="button" className="secondary" onClick={() => resendSelectedOrder('EMAIL')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_email}>{resendingOrderId ? 'Sending...' : 'Resend email'}</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('SMS')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend SMS</button>{WHATSAPP_ENABLED&&<button type="button" className="secondary" onClick={() => resendSelectedOrder('WHATSAPP')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend WhatsApp</button>}{['PENDING','CONFIRMED','PROCESSING'].includes(selectedOrder.status)&&<button type="button" className="secondary" onClick={()=>requestSelectedAction('CANCEL')}>Request cancellation</button>}{canRemoveSelectedOrder && <button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button>}</div>
+        <div className="order-history-actions"><button type="button" className="secondary" onClick={() => resendSelectedOrder('EMAIL')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_email}>{resendingOrderId ? 'Sending...' : 'Resend email'}</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('SMS')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend SMS</button>{WHATSAPP_ENABLED&&<button type="button" className="secondary" onClick={() => resendSelectedOrder('WHATSAPP')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_whatsapp}>Resend WhatsApp</button>}{['PENDING','CONFIRMED','PROCESSING'].includes(selectedOrder.status)&&<button type="button" className="secondary" onClick={()=>requestSelectedAction('CANCEL')}>Request cancellation</button>}{canRemoveSelectedOrder && <button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button>}</div>
       </article> : <div className="order-detail order-detail-empty"><Icon name="search" size={28}/><h2>No order selected</h2><p>Search by an order number from your account.</p></div>}
     </div>}
   </main>
