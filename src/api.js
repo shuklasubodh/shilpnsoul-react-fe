@@ -23,6 +23,7 @@ async function request(path, options = {}) {
     const error = new Error(payload.message || payload.error || 'Something went wrong')
     error.status = response.status
     error.details = payload
+    error.retryAfter = response.headers.get('Retry-After')
     throw error
   }
   return payload.data ?? payload
@@ -36,6 +37,7 @@ export const authApi = {
   }),
   requestVerification: (destination, purpose, channel = 'EMAIL', invitationToken = '') => request('/notification-verifications/request', { auth: purpose === 'CHECKOUT', method: 'POST', body: JSON.stringify({ channel, destination, purpose, invitation_token: invitationToken }) }),
   verifyCode: (verificationId, code, auth = true) => request('/notification-verifications/verify', { auth, method: 'POST', body: JSON.stringify({ verification_id: verificationId, code }) }),
+  checkContactOwnership: (contacts, authenticated = true) => request('/users/contact-ownership/check', { auth: authenticated, method: 'POST', body: JSON.stringify({ contacts }) }),
   register: (details) => request('/auth/register', { auth: false, method: 'POST', body: JSON.stringify(details) }),
   requestPasswordReset: (email) => request('/auth/password-reset/request', { auth: false, method: 'POST', body: JSON.stringify({ email }) }),
   confirmPasswordReset: (email, code, password) => request('/auth/password-reset/confirm', { auth: false, method: 'POST', body: JSON.stringify({ email, code, password }) }),

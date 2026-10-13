@@ -24,16 +24,26 @@ const removeUserCredentials = () => {
 
 const createGuestSessionId = () => globalThis.crypto?.randomUUID?.() || `guest-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
+const guestCartKey = (guestSessionId) => `shoppingCart:guest:${guestSessionId}`
+const guestPendingOrderKey = (guestSessionId) => `pendingStripeOrder:guest:${guestSessionId}`
+
+const removeGuestSessionData = (guestSessionId) => {
+  if (!guestSessionId) return
+  sessionStorage.removeItem(guestCartKey(guestSessionId))
+  sessionStorage.removeItem(guestPendingOrderKey(guestSessionId))
+}
+
 export const getGuestSessionId = () => {
-  let guestSessionId = localStorage.getItem(GUEST_SESSION_KEY)
+  let guestSessionId = sessionStorage.getItem(GUEST_SESSION_KEY)
   if (!guestSessionId) {
     guestSessionId = createGuestSessionId()
-    localStorage.setItem(GUEST_SESSION_KEY, guestSessionId)
+    sessionStorage.setItem(GUEST_SESSION_KEY, guestSessionId)
   }
   return guestSessionId
 }
 
-export const getGuestCartStorageKey = () => `shoppingCart:guest:${getGuestSessionId()}`
+export const getGuestCartStorageKey = () => guestCartKey(getGuestSessionId())
+export const getPendingOrderStorageKey = (userId) => userId ? `pendingStripeOrder:${userId}` : guestPendingOrderKey(getGuestSessionId())
 
 export const startGuestSession = () => {
   removeUserCredentials()
@@ -41,7 +51,15 @@ export const startGuestSession = () => {
   sessionStorage.setItem(MODE_KEY, SESSION_MODE.GUEST)
 }
 
-export const clearSession = startGuestSession
+export const startNewGuestSession = () => {
+  removeUserCredentials()
+  const previousGuestSessionId = sessionStorage.getItem(GUEST_SESSION_KEY)
+  removeGuestSessionData(previousGuestSessionId)
+  sessionStorage.setItem(GUEST_SESSION_KEY, createGuestSessionId())
+  sessionStorage.setItem(MODE_KEY, SESSION_MODE.GUEST)
+}
+
+export const clearSession = startNewGuestSession
 
 export const getSessionToken = () => {
   const mode = sessionStorage.getItem(MODE_KEY)
@@ -53,7 +71,7 @@ export const getSessionToken = () => {
   const token = sessionStorage.getItem(TOKEN_KEY)
   const claims = token && decodeClaims(token)
   if (!claims?.exp || claims.exp * 1000 <= Date.now()) {
-    startGuestSession()
+    startNewGuestSession()
     return null
   }
 
@@ -68,7 +86,7 @@ export const getSessionUser = () => {
     if (!user) throw new Error('Missing session user')
     return user
   } catch {
-    startGuestSession()
+    startNewGuestSession()
     return null
   }
 }
@@ -78,6 +96,8 @@ export const saveSession = ({ token, user }) => {
   if (!user || !claims?.exp || claims.exp * 1000 <= Date.now()) throw new Error('The server returned an invalid session.')
 
   removeUserCredentials()
+  removeGuestSessionData(sessionStorage.getItem(GUEST_SESSION_KEY))
+  sessionStorage.removeItem(GUEST_SESSION_KEY)
   sessionStorage.setItem(TOKEN_KEY, token)
   sessionStorage.setItem(USER_KEY, JSON.stringify(user))
   sessionStorage.setItem(MODE_KEY, SESSION_MODE.USER)

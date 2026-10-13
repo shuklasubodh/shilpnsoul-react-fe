@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import './Contact.css'
 import { authApi, cartApi, catalogApi, contactApi, marketingApi, marketRequirementApi, orderApi, paymentApi } from './api'
-import { getGuestCartStorageKey, getSessionUser, saveSession, startGuestSession } from './session'
+import { getGuestCartStorageKey, getPendingOrderStorageKey, getSessionUser, saveSession, startGuestSession, startNewGuestSession } from './session'
 import AccountAccess from './AccountAccess'
 import CheckoutV2 from './CheckoutV2'
 
@@ -19,7 +19,7 @@ const deliveryChargeFor = subtotal => subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : 
 const REGISTRATION_CHANNELS = WHATSAPP_ENABLED ? ['EMAIL', 'SMS', 'WHATSAPP'] : ['EMAIL', 'SMS']
 const LEGACY_GUEST_CART_KEY = 'shoppingCart:guest'
 const GUEST_CART_TTL_MS = 10 * 60 * 1000
-const pendingStripeOrderKey = (userId) => `pendingStripeOrder:${userId}`
+const pendingStripeOrderKey = getPendingOrderStorageKey
 const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
 const isStripeSuccessReturn = () => paymentReturn() === '/payment/success' || new URLSearchParams(window.location.search).has('session_id')
 const initialView = () => window.location.pathname === '/admin/market-requirements' ? 'requirements-admin' : paymentReturn() === '/payment/cancel' || isStripeSuccessReturn() ? 'checkout' : 'home'
@@ -128,16 +128,16 @@ const parseGuestCart = (value) => {
 const savedGuestCart = () => {
   try {
     const storageKey = getGuestCartStorageKey()
-    const persisted = localStorage.getItem(storageKey)
+    const persisted = sessionStorage.getItem(storageKey)
     const legacy = sessionStorage.getItem(LEGACY_GUEST_CART_KEY)
     if (!persisted && !legacy) return []
     const saved = parseGuestCart(persisted || legacy)
     if (Date.now() - saved.updatedAt >= GUEST_CART_TTL_MS) {
-      localStorage.removeItem(storageKey)
+      sessionStorage.removeItem(storageKey)
       sessionStorage.removeItem(LEGACY_GUEST_CART_KEY)
       return []
     }
-    if (!persisted) localStorage.setItem(storageKey, JSON.stringify(saved))
+    if (!persisted) sessionStorage.setItem(storageKey, JSON.stringify(saved))
     if (legacy) sessionStorage.removeItem(LEGACY_GUEST_CART_KEY)
     return saved.items
   } catch {
@@ -158,8 +158,9 @@ const hydrateCart = (payload, products) => cartRecords(payload).flatMap((record)
 
 const removeLegacyUserCarts = () => {
   Object.keys(localStorage)
-    .filter((key) => key.startsWith('shoppingCart:user:') || key.startsWith('pendingStripeOrder:'))
+    .filter((key) => key.startsWith('shoppingCart:') || key.startsWith('pendingStripeOrder:') || key === 'guestSessionId')
     .forEach((key) => localStorage.removeItem(key))
+  sessionStorage.removeItem('pendingStripeOrder:guest')
 }
 
 const productImages = (product) => {
@@ -246,7 +247,7 @@ function App() {
         window.history.replaceState({}, '', '/')
       } else if (isStripeSuccessReturn()) {
         let pending
-        try { pending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id || 'guest'))) } catch { pending = null }
+        try { pending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id))) } catch { pending = null }
         setConfirmationReference(pending)
         setConfirmed(true)
         setView('checkout')
@@ -302,18 +303,34 @@ function App() {
       syncingGuestCart.current = false
       return
     }
-    localStorage.setItem(getGuestCartStorageKey(), JSON.stringify({ items: cart, updatedAt: Date.now() }))
+    sessionStorage.setItem(getGuestCartStorageKey(), JSON.stringify({ items: cart, updatedAt: Date.now() }))
   }, [cart, user])
 
   useEffect(() => {
     if (user || cart.length === 0) return undefined
     const storageKey = getGuestCartStorageKey()
-    const timer = window.setTimeout(() => {
-      localStorage.removeItem(storageKey)
+    let timer
+    const expireGuest = () => {
+      sessionStorage.removeItem(storageKey)
+      startNewGuestSession()
       setCart([])
       setToast('Your guest cart expired after 10 minutes of inactivity.')
-    }, GUEST_CART_TTL_MS)
-    return () => window.clearTimeout(timer)
+    }
+    const refreshExpiry = () => {
+      window.clearTimeout(timer)
+      try {
+        const saved = parseGuestCart(sessionStorage.getItem(storageKey))
+        sessionStorage.setItem(storageKey, JSON.stringify({ ...saved, updatedAt: Date.now() }))
+      } catch { /* The next cart update recreates malformed storage. */ }
+      timer = window.setTimeout(expireGuest, GUEST_CART_TTL_MS)
+    }
+    const activityEvents = ['pointerdown', 'keydown', 'input', 'scroll']
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, refreshExpiry, { passive: true }))
+    refreshExpiry()
+    return () => {
+      window.clearTimeout(timer)
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, refreshExpiry))
+    }
   }, [cart, user])
 
   useEffect(() => {
@@ -484,14 +501,14 @@ function App() {
     setToast(`Welcome back, ${session.user.first_name}`)
   }
   const logout = async () => {
-    const pendingKey = pendingStripeOrderKey(user?.id || 'guest')
+    const pendingKey = pendingStripeOrderKey(user?.id)
     let pending
     try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
     if (pending?.id) {
       try { await paymentApi.releaseReservation(pending.id, pending.accessToken) } catch { /* The server timeout remains the fallback. */ }
       sessionStorage.removeItem(pendingKey)
     }
-    startGuestSession()
+    startNewGuestSession()
     setUser(null)
     setCart(savedGuestCart())
     setConfirmed(false)
@@ -502,11 +519,14 @@ function App() {
   }
 
   const completeOrder = useCallback((pending) => {
+    const guestCartKey = !user ? getGuestCartStorageKey() : ''
+    const pendingOrderKey = pendingStripeOrderKey(user?.id)
     setConfirmationReference(pending || null)
     setConfirmed(true)
     setCart([])
-    if (!user) localStorage.removeItem(getGuestCartStorageKey())
-    sessionStorage.removeItem(pendingStripeOrderKey(user?.id || 'guest'))
+    if (!user) sessionStorage.removeItem(guestCartKey)
+    sessionStorage.removeItem(pendingOrderKey)
+    if (!user) startNewGuestSession()
     if (user?.id) cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
   }, [user])
 
@@ -849,7 +869,7 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
         return
       }
       if (!notificationConfirmed) throw new Error('Confirm the selected notification channel before placing your order.')
-      const pendingKey = pendingStripeOrderKey(user?.id || 'guest')
+      const pendingKey = pendingStripeOrderKey(user?.id)
       try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
       if (pending?.id) {
         try {
@@ -892,7 +912,7 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
     if (!confirmed) return
     const sessionId = new URLSearchParams(window.location.search).get('session_id')
     let savedPending
-    try { savedPending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id || 'guest'))) } catch { savedPending = null }
+    try { savedPending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id))) } catch { savedPending = null }
     const pending = confirmationReference || savedPending
     const resultRequest = sessionId
       ? paymentApi.checkoutResult(sessionId)
