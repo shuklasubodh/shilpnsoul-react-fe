@@ -120,14 +120,9 @@ export const orderApi = {
 export const paymentApi = {
   createStripeCheckout: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
   releaseReservation: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/release`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
-  checkoutResult: async (sessionId, orderAccessToken = '') => {
+  checkoutResult: (sessionId, orderAccessToken = '') => {
     const headers = orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined
-    try {
-      return await request('/payments/checkout-sessions/result', { method: 'POST', headers, body: JSON.stringify({ session_id: sessionId }) })
-    } catch (error) {
-      if (![404, 405].includes(error.status)) throw error
-      return request(`/payments/checkout-sessions/${encodeURIComponent(sessionId)}/result`, { headers })
-    }
+    return request('/payments/checkout-sessions/result', { method: 'POST', headers, body: JSON.stringify({ session_id: sessionId }) })
   },
   orderResult: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/payment`, { headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
 }
