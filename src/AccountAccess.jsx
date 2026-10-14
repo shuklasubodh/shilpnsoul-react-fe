@@ -61,7 +61,6 @@ function InvitationSetup({ token, close, success }) {
     try {
       if (channels.some((channel) => !tokens[channel])) throw new Error('Verify every contact included in the invitation.')
       const result = await authApi.acceptInvitation({ invitation_token: token, password: data.get('password'), verification_tokens: tokens })
-      window.history.replaceState({}, '', '/')
       if (result.token) success(result)
       else { setMessage('Account setup complete. You can now sign in through the appropriate portal.'); window.setTimeout(close, 1800) }
     } catch (failure) { setError(failure.message) }
@@ -79,7 +78,15 @@ function InvitationSetup({ token, close, success }) {
 }
 
 export default function AccountAccess({ close, success, continueAsGuest }) {
-  const invitationToken = new URLSearchParams(window.location.search).get('invitation') || ''
+  const [invitationToken] = useState(() => {
+    const url = new URL(window.location.href)
+    const token = url.searchParams.get('invitation') || ''
+    if (token) {
+      url.searchParams.delete('invitation')
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+    return token
+  })
   return invitationToken
     ? <InvitationSetup token={invitationToken} close={close} success={success}/>
     : <StandardAccountAccess close={close} success={success} continueAsGuest={continueAsGuest}/>

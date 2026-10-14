@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import './Contact.css'
 import { authApi, cartApi, catalogApi, contactApi, marketingApi, marketRequirementApi, orderApi, paymentApi } from './api'
-import { getGuestCartStorageKey, getPendingOrderStorageKey, getSessionUser, saveSession, startGuestSession, startNewGuestSession } from './session'
+import { getGuestCartStorageKey, getGuestSessionId, getPendingOrderStorageKey, getSessionUser, saveSession, startGuestSession, startNewGuestSession } from './session'
+import { consumeStripeSessionId, validatedStripeCheckoutUrl } from './security'
 import AccountAccess from './AccountAccess'
 import CheckoutV2 from './CheckoutV2'
 
@@ -203,6 +204,8 @@ function App() {
   const [contactOpen, setContactOpen] = useState(false)
   const [user, setUser] = useState(getSessionUser)
   const isLoggedIn = Boolean(user)
+  const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(String(user?.role || user?.user_role || '').toUpperCase())
+  const [sessionIdentity, setSessionIdentity] = useState(() => user?.id || getGuestSessionId())
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
   const [banners, setBanners] = useState([])
@@ -229,6 +232,7 @@ function App() {
   useEffect(() => {
     const expireSession = () => {
       setUser(null)
+      setSessionIdentity(getGuestSessionId())
       setCart(savedGuestCart())
       setCheckoutMode('guest')
       setToast('Your session expired. Please sign in again.')
@@ -496,6 +500,7 @@ function App() {
     saveSession(session)
     setCart([])
     setUser(session.user)
+    setSessionIdentity(session.user.id)
     setCheckoutMode('customer')
     setLoginOpen(false)
     setToast(`Welcome back, ${session.user.first_name}`)
@@ -508,14 +513,37 @@ function App() {
       try { await paymentApi.releaseReservation(pending.id, pending.accessToken) } catch { /* The server timeout remains the fallback. */ }
       sessionStorage.removeItem(pendingKey)
     }
+    let serverLogoutFailed = false
+    try { await authApi.logout() } catch { serverLogoutFailed = true }
     startNewGuestSession()
     setUser(null)
+    setSessionIdentity(getGuestSessionId())
     setCart(savedGuestCart())
     setConfirmed(false)
     setCheckoutMode('guest')
     go('home')
     setLoginOpen(false)
-    setToast('')
+    setToast(serverLogoutFailed ? 'Signed out on this device. The server session could not be confirmed as revoked.' : '')
+  }
+
+  const endGuestSession = async () => {
+    const pendingKey = pendingStripeOrderKey()
+    let pending
+    try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
+    if (pending?.id) {
+      try { await paymentApi.releaseReservation(pending.id, pending.accessToken) } catch { /* The server timeout remains the fallback. */ }
+    }
+    startNewGuestSession()
+    setSessionIdentity(getGuestSessionId())
+    setCart([])
+    setConfirmed(false)
+    setConfirmationReference(null)
+    setCheckoutMode('guest')
+    setCartOpen(false)
+    setLoginOpen(false)
+    if (window.location.pathname !== '/') window.history.replaceState({}, '', '/')
+    go('home')
+    setToast('Guest session ended securely.')
   }
 
   const completeOrder = useCallback((pending) => {
@@ -526,7 +554,10 @@ function App() {
     setCart([])
     if (!user) sessionStorage.removeItem(guestCartKey)
     sessionStorage.removeItem(pendingOrderKey)
-    if (!user) startNewGuestSession()
+    if (!user) {
+      startNewGuestSession()
+      setSessionIdentity(getGuestSessionId())
+    }
     if (user?.id) cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
   }, [user])
 
@@ -547,6 +578,7 @@ function App() {
           <button className="icon-button search-button" aria-label="Search products" aria-expanded={searchOpen} onClick={() => searchOpen ? setSearchOpen(false) : openSearch()}><Icon name="search" /></button>
           <button className="account-button" onClick={() => isLoggedIn ? go('orders') : setLoginOpen(true)}><Icon name="user"/><span>{isLoggedIn ? `Hi, ${user.first_name}` : 'Sign in'}</span></button>
           {isLoggedIn && <button className="logout-button" onClick={logout}>Log out</button>}
+          {!isLoggedIn && <button className="logout-button" onClick={endGuestSession}>End guest session</button>}
           <button className="icon-button bag-button" onClick={() => setCartOpen(true)} aria-label={`Shopping bag with ${count} items`}><Icon name="bag"/><b>{count}</b></button>
         </div>
       </header>
@@ -554,11 +586,11 @@ function App() {
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setView('shop') }} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
       {(view === 'home' || view === 'shop' || view === 'team') && <Shop mode={view} products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
-      {view === 'checkout' && <CheckoutV2 cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} onSignIn={() => setLoginOpen(true)} />}
+      {view === 'checkout' && <CheckoutV2 key={sessionIdentity} cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} onSignIn={() => setLoginOpen(true)} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
       {view === 'orders' && <Orders products={products} />}
-      {view === 'requirements-admin' && <MarketRequirementsAdmin user={user} />}
+      {view === 'requirements-admin' && (isAdmin ? <MarketRequirementsAdmin user={user} /> : <main className="requirements-page"><div className="catalog-status error" role="alert">Admin access is required.</div></main>)}
 
       <footer>
         <div className="footer-brand"><div className="brand light"><span>shilp</span><i>&</i><span>soul</span></div><p>Objects with a story. Made slowly,<br/>chosen thoughtfully.</p></div>
@@ -780,6 +812,7 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
   const [notificationChannel, setNotificationChannel] = useState(() => isLoggedIn && (WHATSAPP_ENABLED || user?.preferred_notification_channel !== 'WHATSAPP') ? user?.preferred_notification_channel || 'EMAIL' : 'EMAIL')
   const [verificationId, setVerificationId] = useState(null)
   const [verificationToken, setVerificationToken] = useState('')
+  const [checkoutId, setCheckoutId] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [verificationBusy, setVerificationBusy] = useState(false)
   const [verificationMessage, setVerificationMessage] = useState('')
@@ -828,7 +861,9 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
         return
       }
       if (notificationChannel === 'WHATSAPP' && !/^\+[1-9]\d{7,14}$/.test(notificationDestination)) throw new Error('Enter a valid phone number, for example +6591234567.')
-      const result = await authApi.requestVerification(notificationDestination, 'CHECKOUT', notificationChannel)
+      const purpose = isLoggedIn ? 'ACCOUNT_CONTACT_CHANGE' : 'CHECKOUT'
+      const result = await authApi.requestVerification(notificationDestination, purpose, notificationChannel, '', checkoutId)
+      if (result.checkout_id) setCheckoutId(result.checkout_id)
       if (result.verified) setVerificationMessage(`Your saved ${notificationDestinationName} is already verified.`)
       else {
         setVerificationId(result.verification_id)
@@ -842,7 +877,8 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
     setVerificationBusy(true)
     setPaymentError('')
     try {
-      const result = await authApi.verifyCode(verificationId, verificationCode, isLoggedIn)
+      const result = await authApi.verifyCode(verificationId, verificationCode, isLoggedIn, checkoutId)
+      if (result.checkout_id) setCheckoutId(result.checkout_id)
       setVerificationToken(result.verification_token)
       setVerificationMessage(`${notificationDestinationName === 'email' ? 'Email' : 'Phone number'} confirmed for this order.`)
     } catch (error) { setPaymentError(error.message) }
@@ -893,6 +929,7 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
           shipping_name: data.get('name'), shipping_phone: submittedPhoneE164, shipping_address: data.get('shippingAddress'),
           contact_email: submittedEmail, contact_phone: submittedPhoneE164, contact_whatsapp: WHATSAPP_ENABLED ? normalizedCheckoutWhatsapp : '', payment_method: 'STRIPE',
           notification_channel: notificationChannel, notification_destination: notificationDestination, notification_verification_token: verificationToken,
+          verification_tokens: verificationToken ? { [notificationChannel]: verificationToken } : {}, ...(checkoutId ? { checkout_id: checkoutId } : {}),
         }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
         const order = isLoggedIn ? await orderApi.checkout({ ...details, items }) : await orderApi.guestCheckout(details, items)
@@ -901,7 +938,10 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
       }
       const result = await paymentApi.createStripeCheckout(pending.id, pending.accessToken)
       if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
-      window.location.assign(result.checkout_url)
+      setVerificationId(null)
+      setVerificationCode('')
+      setVerificationToken('')
+      window.location.assign(validatedStripeCheckoutUrl(result.checkout_url))
     } catch (error) {
       setPaymentError(error.message || 'Stripe checkout could not be started. Please try again.')
       setRedirecting(false)
@@ -910,12 +950,12 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
 
   useEffect(() => {
     if (!confirmed) return
-    const sessionId = new URLSearchParams(window.location.search).get('session_id')
+    const sessionId = consumeStripeSessionId()
     let savedPending
     try { savedPending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id))) } catch { savedPending = null }
     const pending = confirmationReference || savedPending
     const resultRequest = sessionId
-      ? paymentApi.checkoutResult(sessionId)
+      ? paymentApi.checkoutResult(sessionId, pending?.accessToken)
       : pending?.id
         ? paymentApi.orderResult(pending.id, pending.accessToken)
         : Promise.reject(new Error('Order reference is unavailable. Please use order tracking to find your order.'))
@@ -1020,6 +1060,9 @@ export function LegacyLogin({ close, success, continueAsGuest }) {
 function TrackOrder() {
   const [result, setResult] = useState(null)
   const [channel, setChannel] = useState('EMAIL')
+  const [trackingRequestId, setTrackingRequestId] = useState('')
+  const [trackingCode, setTrackingCode] = useState('')
+  const [pendingTracking, setPendingTracking] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [notificationMessage, setNotificationMessage] = useState('')
@@ -1029,13 +1072,47 @@ function TrackOrder() {
     setResult(null)
     setLoading(true)
     const data = new FormData(event.currentTarget)
+    const trackingDetails = { orderNumber: String(data.get('orderNumber')).trim(), channel, destination: String(data.get('destination')).trim() }
     try {
-      setResult(await orderApi.track(String(data.get('orderNumber')).trim(), channel, String(data.get('destination')).trim()))
+      const request = await orderApi.track(trackingDetails.orderNumber, trackingDetails.channel, trackingDetails.destination)
+      if (!request.tracking_request_id) throw new Error('The tracking service did not return a verification request.')
+      setPendingTracking(trackingDetails)
+      setTrackingRequestId(request.tracking_request_id)
+      setTrackingCode('')
+      setNotificationMessage(`A six-digit tracking code was sent by ${channel === 'WHATSAPP' ? 'WhatsApp' : channel === 'SMS' ? 'SMS' : 'email'}.`)
     } catch (trackError) {
       setError(trackError.message || 'Unable to track this order.')
     } finally {
       setLoading(false)
     }
+  }
+  const verifyTracking = async (event) => {
+    event.preventDefault()
+    setLoading(true); setError(''); setNotificationMessage('')
+    try {
+      const order = await orderApi.verifyTracking(trackingRequestId, trackingCode)
+      if (!order.order_access_token) throw new Error('Order access could not be established.')
+      setResult(order)
+      setTrackingRequestId('')
+      setTrackingCode('')
+      setPendingTracking(null)
+    } catch (verifyError) { setError(verifyError.message || 'The tracking code could not be verified.') }
+    finally { setLoading(false) }
+  }
+  const resendTrackingCode = async () => {
+    if (!pendingTracking) return
+    setLoading(true); setError(''); setNotificationMessage('')
+    try {
+      const request = await orderApi.track(pendingTracking.orderNumber, pendingTracking.channel, pendingTracking.destination)
+      if (!request.tracking_request_id) throw new Error('The tracking service did not return a verification request.')
+      setTrackingRequestId(request.tracking_request_id)
+      setTrackingCode('')
+      setNotificationMessage('A new six-digit tracking code was sent. Only the latest code is valid.')
+    } catch (resendError) { setError(resendError.message || 'Unable to resend the tracking code.') }
+    finally { setLoading(false) }
+  }
+  const restartTracking = () => {
+    setTrackingRequestId(''); setTrackingCode(''); setPendingTracking(null); setResult(null); setError(''); setNotificationMessage('')
   }
   const resend = async () => {
     setLoading(true);setError('');setNotificationMessage('')
@@ -1062,7 +1139,7 @@ function TrackOrder() {
   const progress = { PENDING: 15, CONFIRMED: 30, PROCESSING: 50, SHIPPED: 75, DELIVERED: 100 }[status] || 0
   const channelName = channel === 'WHATSAPP' ? 'WhatsApp' : channel === 'SMS' ? 'SMS' : 'Email'
   const resultChannelName = result?.notification_channel === 'WHATSAPP' ? 'WhatsApp' : result?.notification_channel === 'SMS' ? 'SMS' : 'email'
-  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Use any contact method captured during guest checkout.</p><form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><div className="notification-channels" role="radiogroup" aria-label="Tracking contact method"><label className={channel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'EMAIL'} onChange={() => setChannel('EMAIL')}/> Email</label>{WHATSAPP_ENABLED&&<label className={channel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'WHATSAPP'} onChange={() => setChannel('WHATSAPP')}/> WhatsApp</label>}<label className={channel === 'SMS' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'SMS'} onChange={() => setChannel('SMS')}/> SMS</label></div><label>{channelName} {channel === 'EMAIL' ? 'address' : 'number'}<input required name="destination" type={channel === 'EMAIL' ? 'email' : 'tel'} placeholder={channel === 'EMAIL' ? 'you@example.com' : '+6591234567'} autoComplete={channel === 'EMAIL' ? 'email' : 'tel'}/></label><button className="primary full" disabled={loading}>{loading ? 'Finding your order…' : 'Track order'} {!loading && <Icon name="arrow" size={18}/>}</button></form>{error && <p className="login-error" role="alert">{error}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p><div className="tracking-resend-actions"><button className="secondary" type="button" onClick={resend} disabled={loading}>Resend by {resultChannelName}</button><button className="secondary" type="button" onClick={checkDelivery} disabled={loading}>Check delivery status</button>{['PENDING','CONFIRMED','PROCESSING'].includes(status)&&<button className="secondary" type="button" onClick={()=>requestGuestAction('CANCEL')} disabled={loading}>Request cancellation</button>}{status==='DELIVERED'&&(result.items||[]).map((item)=><button className="secondary" type="button" key={`return-${item.id}`} onClick={()=>requestGuestAction('RETURN',item)} disabled={loading}>Return {item.product_name}</button>)}</div>{notificationMessage&&<p className="verification-success" role="status">{notificationMessage}</p>}</div>}</div></main>
+  return <main className="utility-page"><div className="utility-card"><span className="eyebrow">Guest order tracking</span><h1>Where is my order?</h1><p>Use any contact method captured during guest checkout.</p>{!trackingRequestId && !result && <form onSubmit={submit}><label>Order number<input required name="orderNumber" placeholder="ORD-…" autoComplete="off"/></label><div className="notification-channels" role="radiogroup" aria-label="Tracking contact method"><label className={channel === 'EMAIL' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'EMAIL'} onChange={() => setChannel('EMAIL')}/> Email</label>{WHATSAPP_ENABLED&&<label className={channel === 'WHATSAPP' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'WHATSAPP'} onChange={() => setChannel('WHATSAPP')}/> WhatsApp</label>}<label className={channel === 'SMS' ? 'selected' : ''}><input type="radio" name="trackingChannel" checked={channel === 'SMS'} onChange={() => setChannel('SMS')}/> SMS</label></div><label>{channelName} {channel === 'EMAIL' ? 'address' : 'number'}<input required name="destination" type={channel === 'EMAIL' ? 'email' : 'tel'} placeholder={channel === 'EMAIL' ? 'you@example.com' : '+6591234567'} autoComplete={channel === 'EMAIL' ? 'email' : 'tel'}/></label><button className="primary full" disabled={loading}>{loading ? 'Sending tracking code…' : 'Send tracking code'} {!loading && <Icon name="arrow" size={18}/>}</button></form>}{trackingRequestId && !result && <form onSubmit={verifyTracking}><label>Six-digit tracking code<input required inputMode="numeric" autoComplete="one-time-code" maxLength="6" value={trackingCode} onChange={(event) => setTrackingCode(event.target.value.replace(/\D/g, '').slice(0, 6))}/></label><button className="primary full" disabled={loading || trackingCode.length !== 6}>{loading ? 'Verifying…' : 'Verify and view order'}</button><div className="tracking-resend-actions"><button className="secondary" type="button" disabled={loading} onClick={resendTrackingCode}>Resend code</button><button className="secondary" type="button" disabled={loading} onClick={restartTracking}>Use different details</button></div></form>}{error && <p className="login-error" role="alert">{error}</p>}{notificationMessage && <p className="verification-note" role="status">{notificationMessage}</p>}{result && <div className="tracking-result"><div><span>Order status</span><strong>{status === 'PROCESSING' ? 'Preparing your pieces' : status}</strong></div><div className="progress"><i style={{ width: `${progress}%` }}></i></div><div className="steps"><b>Confirmed</b><span>Preparing</span><span>Dispatched</span><span>Delivered</span></div><p>Order {result.order_number} · Payment {result.payment_status}</p><div className="tracking-resend-actions"><button className="secondary" type="button" onClick={resend} disabled={loading}>Resend by {resultChannelName}</button><button className="secondary" type="button" onClick={checkDelivery} disabled={loading}>Check delivery status</button>{['PENDING','CONFIRMED','PROCESSING'].includes(status)&&<button className="secondary" type="button" onClick={()=>requestGuestAction('CANCEL')} disabled={loading}>Request cancellation</button>}{status==='DELIVERED'&&(result.items||[]).map((item)=><button className="secondary" type="button" key={`return-${item.id}`} onClick={()=>requestGuestAction('RETURN',item)} disabled={loading}>Return {item.product_name}</button>)}<button className="secondary" type="button" onClick={restartTracking}>Track another order</button></div>{notificationMessage&&<p className="verification-success" role="status">{notificationMessage}</p>}</div>}</div></main>
 }
 
 function Orders({ products }) {

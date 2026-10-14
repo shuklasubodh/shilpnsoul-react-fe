@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { authApi, orderApi, paymentApi } from './api'
 import { getPendingOrderStorageKey } from './session'
+import { consumeStripeSessionId, validatedStripeCheckoutUrl } from './security'
 
 const STRIPE_PAYMENTS_ENABLED = import.meta.env.VITE_STRIPE_PAYMENTS_ENABLED === 'true'
 const GUEST_CHECKOUT_ENABLED = import.meta.env.VITE_GUEST_CHECKOUT_ENABLED === 'true'
@@ -50,6 +51,7 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
   const [verificationIds, setVerificationIds] = useState({})
   const [verificationCodes, setVerificationCodes] = useState({})
   const [verificationTokens, setVerificationTokens] = useState({})
+  const [checkoutId, setCheckoutId] = useState('')
   const [serverVerifiedChannels, setServerVerifiedChannels] = useState({})
   const [selectedChannels, setSelectedChannels] = useState([])
   const [ownershipFingerprint, setOwnershipFingerprint] = useState('')
@@ -98,6 +100,7 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
   const showCustomerConflict = () => {
     setCustomerConflict(true)
     setVerificationIds({}); setVerificationCodes({}); setVerificationTokens({}); setServerVerifiedChannels({}); setExtraChannels([])
+    setCheckoutId('')
     setError(''); setMessage('')
   }
   const ensureContactOwnership = async () => {
@@ -129,7 +132,13 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
     try {
       const ownershipResult = await ensureContactOwnership()
       if (ownershipResult === false) return
-      const result = await authApi.requestVerification(destinations[channel], 'CHECKOUT', channel)
+      if (ownershipResult === 'DEFER_TO_CHANNEL') {
+        setError('Contact ownership cannot be checked right now. No code was sent. Please try again later or sign in with the customer credentials.')
+        return
+      }
+      const purpose = isLoggedIn ? 'ACCOUNT_CONTACT_CHANGE' : 'CHECKOUT'
+      const result = await authApi.requestVerification(destinations[channel], purpose, channel, '', checkoutId)
+      if (result.checkout_id) setCheckoutId(result.checkout_id)
       if (result.verified) {
         setServerVerifiedChannels((current) => ({ ...current, [channel]: true }))
         setMessage(`${channelName(channel)} is already verified.`)
@@ -153,7 +162,8 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
     if (channel !== currentChannel) { setError(`Complete ${channelName(currentChannel)} verification first.`); return }
     setBusy(true); setError('')
     try {
-      const result = await authApi.verifyCode(verificationIds[channel], verificationCodes[channel], isLoggedIn)
+      const result = await authApi.verifyCode(verificationIds[channel], verificationCodes[channel], isLoggedIn, checkoutId)
+      if (result.checkout_id) setCheckoutId(result.checkout_id)
       setVerificationTokens((current) => ({ ...current, [channel]: result.verification_token }))
       setMessage(`${channelName(channel)} verified${isLoggedIn ? ' and ready to save to your customer account' : ' for this order'}.`)
     } catch (failure) {
@@ -173,7 +183,7 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
     const savedWhatsapp = user?.whatsapp_number || user?.phone || ''
     setEmail(isLoggedIn ? user?.email || '' : ''); setPhone(isLoggedIn ? user?.phone || '' : ''); setWhatsapp(isLoggedIn ? savedWhatsapp : '')
     setSameAsMobile(isLoggedIn ? !user?.whatsapp_number || user?.whatsapp_number === user?.phone : true); setExtraChannels([]); setSelectedChannels([])
-    setVerificationIds({}); setVerificationCodes({}); setVerificationTokens({}); setServerVerifiedChannels({}); setRetryUntil({}); setVerifyRetryUntil({}); setOwnershipFingerprint('')
+    setVerificationIds({}); setVerificationCodes({}); setVerificationTokens({}); setServerVerifiedChannels({}); setRetryUntil({}); setVerifyRetryUntil({}); setOwnershipFingerprint(''); setCheckoutId('')
     setCustomerConflict(false); setError(''); setMessage('')
   }
 
@@ -218,7 +228,7 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
       }
       if (!pending?.id) {
         const customerContactUpdates = isLoggedIn ? selectedChannels.filter((channel) => verificationTokens[channel] && !accountVerified(channel)) : []
-        const details = { shipping_name: data.get('name'), shipping_phone: toE164(phone), shipping_address: data.get('shippingAddress'), contact_email: destinations.EMAIL, contact_phone: destinations.SMS || '', contact_whatsapp: destinations.WHATSAPP || '', payment_method: 'STRIPE', notification_channels: ['EMAIL', ...extraChannels], verification_channels: selectedChannels, notification_verification_tokens: verificationTokens, customer_contact_updates: customerContactUpdates, verification_scope: isLoggedIn ? 'CUSTOMER' : 'ORDER_ONLY' }
+        const details = { shipping_name: data.get('name'), shipping_phone: toE164(phone), shipping_address: data.get('shippingAddress'), contact_email: destinations.EMAIL, contact_phone: destinations.SMS || '', contact_whatsapp: destinations.WHATSAPP || '', payment_method: 'STRIPE', notification_channels: ['EMAIL', ...extraChannels], verification_channels: selectedChannels, notification_verification_tokens: verificationTokens, verification_tokens: verificationTokens, customer_contact_updates: customerContactUpdates, verification_scope: isLoggedIn ? 'CUSTOMER' : 'ORDER_ONLY', ...(checkoutId ? { checkout_id: checkoutId } : {}) }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
         const order = isLoggedIn ? await orderApi.checkout({ ...details, items }) : await orderApi.guestCheckout(details, items)
         pending = { id: order.id, accessToken: order.order_access_token || '' }
@@ -226,17 +236,20 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
       }
       const result = await paymentApi.createStripeCheckout(pending.id, pending.accessToken)
       if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
-      window.location.assign(result.checkout_url)
+      setVerificationIds({})
+      setVerificationCodes({})
+      setVerificationTokens({})
+      window.location.assign(validatedStripeCheckoutUrl(result.checkout_url))
     } catch (failure) { setError(failure.message || 'Checkout could not be started.'); setBusy(false) }
   }
 
   useEffect(() => {
     if (!confirmed) return
-    const sessionId = new URLSearchParams(window.location.search).get('session_id')
+    const sessionId = consumeStripeSessionId()
     let saved
     try { saved = JSON.parse(sessionStorage.getItem(getPendingOrderStorageKey(user?.id))) } catch { saved = null }
     const pending = confirmationReference || saved
-    const request = sessionId ? paymentApi.checkoutResult(sessionId) : pending?.id ? paymentApi.orderResult(pending.id, pending.accessToken) : Promise.reject(new Error('Order reference is unavailable.'))
+    const request = sessionId ? paymentApi.checkoutResult(sessionId, pending?.accessToken) : pending?.id ? paymentApi.orderResult(pending.id, pending.accessToken) : Promise.reject(new Error('Order reference is unavailable.'))
     request.then((result) => {
       setConfirmedOrder(result)
       if (result.payment_status === 'PAID') onConfirm(pending)

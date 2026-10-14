@@ -2,6 +2,25 @@ import { clearSession, getSessionToken } from './session'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
 
+const safeErrorMessage = (status, path, payload) => {
+  const serverMessage = String(payload?.message || payload?.error || '').trim()
+  const serverCode = String(payload?.code || payload?.error_code || '').toUpperCase()
+
+  if (status === 401 && path === '/auth/login') return 'The email address or password is incorrect.'
+  if (status === 401) return 'Authentication is required. Please sign in and try again.'
+  if (status === 403) return 'You do not have permission to perform this action.'
+  if (status === 404) return 'The requested information is no longer available.'
+  if (status === 410) return 'This link is no longer available. Request a new invitation.'
+  if (status === 409 && /contact-ownership|notification-verifications/.test(path)) return 'Customer details are already present. Reset the unverified values or sign in with the customer credentials.'
+  if (status === 409) return 'This request conflicts with existing information. Refresh and try again.'
+  if (status === 429) return 'Too many attempts. Please wait before trying again.'
+  if (/EXPIRED/.test(serverCode) || /\bexpired\b/i.test(serverMessage)) return 'The verification code has expired.'
+  if (/INVALID.*(?:CODE|TOKEN)|(?:CODE|TOKEN).*INVALID/.test(serverCode) || (/invalid|incorrect/i.test(serverMessage) && /code|token/i.test(serverMessage))) return 'The verification code is incorrect.'
+  if (status === 400 || status === 422) return 'Check the information supplied and try again.'
+  if (status >= 500) return 'The service is temporarily unavailable. Please try again.'
+  return 'The request could not be completed. Please try again.'
+}
+
 async function request(path, options = {}) {
   const { auth = true, ...fetchOptions } = options
   const token = auth ? getSessionToken() : null
@@ -14,15 +33,18 @@ async function request(path, options = {}) {
     },
   })
   const payload = await response.json().catch(() => ({}))
-  const authenticationFailed = response.status === 401 && /^Authentication (?:is )?required\.?$/i.test(String(payload.message || payload.error || '').trim())
-  if (token && authenticationFailed) {
+  if (token && response.status === 401) {
     clearSession()
     window.dispatchEvent(new Event('auth:expired'))
   }
   if (!response.ok) {
-    const error = new Error(payload.message || payload.error || 'Something went wrong')
+    const error = new Error(safeErrorMessage(response.status, path, payload))
     error.status = response.status
-    error.details = payload
+    error.code = String(payload.code || payload.error_code || '')
+    error.details = {
+      retry_after_seconds: payload.retry_after_seconds,
+      retry_after: payload.retry_after,
+    }
     error.retryAfter = response.headers.get('Retry-After')
     throw error
   }
@@ -35,13 +57,18 @@ export const authApi = {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   }),
-  requestVerification: (destination, purpose, channel = 'EMAIL', invitationToken = '') => request('/notification-verifications/request', { auth: purpose === 'CHECKOUT', method: 'POST', body: JSON.stringify({ channel, destination, purpose, invitation_token: invitationToken }) }),
-  verifyCode: (verificationId, code, auth = true) => request('/notification-verifications/verify', { auth, method: 'POST', body: JSON.stringify({ verification_id: verificationId, code }) }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  requestVerification: (destination, purpose, channel = 'EMAIL', invitationToken = '', checkoutId = '') => request('/notification-verifications/request', {
+    auth: purpose === 'CHECKOUT' || purpose === 'ACCOUNT_CONTACT_CHANGE',
+    method: 'POST',
+    body: JSON.stringify({ channel, destination, purpose, ...(invitationToken ? { invitation_token: invitationToken } : {}), ...(checkoutId ? { checkout_id: checkoutId } : {}) }),
+  }),
+  verifyCode: (verificationId, code, auth = true, checkoutId = '') => request('/notification-verifications/verify', { auth, method: 'POST', body: JSON.stringify({ verification_id: verificationId, code, ...(checkoutId ? { checkout_id: checkoutId } : {}) }) }),
   checkContactOwnership: (contacts, authenticated = true) => request('/users/contact-ownership/check', { auth: authenticated, method: 'POST', body: JSON.stringify({ contacts }) }),
   register: (details) => request('/auth/register', { auth: false, method: 'POST', body: JSON.stringify(details) }),
   requestPasswordReset: (email) => request('/auth/password-reset/request', { auth: false, method: 'POST', body: JSON.stringify({ email }) }),
   confirmPasswordReset: (email, code, password) => request('/auth/password-reset/confirm', { auth: false, method: 'POST', body: JSON.stringify({ email, code, password }) }),
-  invitation: (token) => request(`/auth/invitations/${encodeURIComponent(token)}`, { auth: false }),
+  invitation: (token) => request('/auth/invitations/inspect', { auth: false, method: 'POST', body: JSON.stringify({ invitation_token: token }) }),
   acceptInvitation: (details) => request('/auth/invitations/accept', { auth: false, method: 'POST', body: JSON.stringify(details) }),
   phoneAvailability: (countryCode, phone) => request(`/users/phone-availability?${new URLSearchParams({ country_code: countryCode, phone })}`, { auth: false }),
   session: () => request('/auth/session'),
@@ -85,6 +112,7 @@ export const orderApi = {
   resendGuestSummary: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/resend`, { auth: false, method: 'POST', headers: { 'X-Order-Access-Token': accessToken } }),
   guestNotificationStatus: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/status`, { auth: false, headers: { 'X-Order-Access-Token': accessToken } }),
   track: (orderNumber, channel, destination) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ orderNumber, channel, destination }) }),
+  verifyTracking: (trackingRequestId, code) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ tracking_request_id: trackingRequestId, code }) }),
   requestAction: (orderId, details) => request(`/orders/${encodeURIComponent(orderId)}/actions`, { method: 'POST', body: JSON.stringify(details) }),
   requestGuestAction: (orderId, accessToken, details) => request(`/orders/${encodeURIComponent(orderId)}/guest-actions`, { auth: false, method: 'POST', headers: { 'X-Order-Access-Token': accessToken }, body: JSON.stringify(details) }),
 }
@@ -92,7 +120,15 @@ export const orderApi = {
 export const paymentApi = {
   createStripeCheckout: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
   releaseReservation: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/release`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
-  checkoutResult: (sessionId) => request(`/payments/checkout-sessions/${encodeURIComponent(sessionId)}/result`, { auth: false }),
+  checkoutResult: async (sessionId, orderAccessToken = '') => {
+    const headers = orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined
+    try {
+      return await request('/payments/checkout-sessions/result', { method: 'POST', headers, body: JSON.stringify({ session_id: sessionId }) })
+    } catch (error) {
+      if (![404, 405].includes(error.status)) throw error
+      return request(`/payments/checkout-sessions/${encodeURIComponent(sessionId)}/result`, { headers })
+    }
+  },
   orderResult: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/payment`, { headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
 }
 
