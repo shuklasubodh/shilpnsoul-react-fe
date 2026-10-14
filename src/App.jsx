@@ -212,6 +212,7 @@ function App() {
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [cart, setCart] = useState(() => user ? [] : savedGuestCart())
+  const [guestSessionActive, setGuestSessionActive] = useState(() => !user && (cart.length > 0 || Boolean(sessionStorage.getItem(pendingStripeOrderKey()))))
   const [checkoutMode, setCheckoutMode] = useState(() => user || !GUEST_CHECKOUT_ENABLED ? 'customer' : 'guest')
   const [confirmed, setConfirmed] = useState(isStripeSuccessReturn)
   const [confirmationReference, setConfirmationReference] = useState(null)
@@ -232,6 +233,7 @@ function App() {
   useEffect(() => {
     const expireSession = () => {
       setUser(null)
+      setGuestSessionActive(false)
       setSessionIdentity(getGuestSessionId())
       setCart(savedGuestCart())
       setCheckoutMode('guest')
@@ -317,6 +319,7 @@ function App() {
     const expireGuest = () => {
       sessionStorage.removeItem(storageKey)
       startNewGuestSession()
+      setGuestSessionActive(false)
       setCart([])
       setToast('Your guest cart expired after 10 minutes of inactivity.')
     }
@@ -409,6 +412,7 @@ function App() {
         return
       }
     } else {
+    setGuestSessionActive(true)
     setCart((current) => current.some((item) => cartLineKey(item) === lineKey)
       ? current.map((item) => cartLineKey(item) === lineKey ? { ...item, quantity: Math.min(item.quantity + 1, item.stock) } : item)
       : [...current, { ...product, quantity: 1, productColorId, color: selectedColor?.color || '', stock: availableStock, lineKey }])
@@ -500,6 +504,7 @@ function App() {
     saveSession(session)
     setCart([])
     setUser(session.user)
+    setGuestSessionActive(false)
     setSessionIdentity(session.user.id)
     setCheckoutMode('customer')
     setLoginOpen(false)
@@ -517,6 +522,7 @@ function App() {
     try { await authApi.logout() } catch { serverLogoutFailed = true }
     startNewGuestSession()
     setUser(null)
+    setGuestSessionActive(false)
     setSessionIdentity(getGuestSessionId())
     setCart(savedGuestCart())
     setConfirmed(false)
@@ -527,6 +533,7 @@ function App() {
   }
 
   const endGuestSession = async () => {
+    setGuestSessionActive(false)
     const pendingKey = pendingStripeOrderKey()
     let pending
     try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
@@ -556,6 +563,7 @@ function App() {
     sessionStorage.removeItem(pendingOrderKey)
     if (!user) {
       startNewGuestSession()
+      setGuestSessionActive(false)
       setSessionIdentity(getGuestSessionId())
     }
     if (user?.id) cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
@@ -578,7 +586,7 @@ function App() {
           <button className="icon-button search-button" aria-label="Search products" aria-expanded={searchOpen} onClick={() => searchOpen ? setSearchOpen(false) : openSearch()}><Icon name="search" /></button>
           <button className="account-button" onClick={() => isLoggedIn ? go('orders') : setLoginOpen(true)}><Icon name="user"/><span>{isLoggedIn ? `Hi, ${user.first_name}` : 'Sign in'}</span></button>
           {isLoggedIn && <button className="logout-button" onClick={logout}>Log out</button>}
-          {!isLoggedIn && <button className="logout-button" onClick={endGuestSession}>End guest session</button>}
+          {!isLoggedIn && guestSessionActive && <button className="logout-button" onClick={endGuestSession}>End guest session</button>}
           <button className="icon-button bag-button" onClick={() => setCartOpen(true)} aria-label={`Shopping bag with ${count} items`}><Icon name="bag"/><b>{count}</b></button>
         </div>
       </header>
@@ -600,7 +608,7 @@ function App() {
       </footer>
 
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => isLoggedIn ? go('checkout') : (setCartOpen(false), setLoginOpen(true))} /></>}
-      {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><AccountAccess close={() => { startGuestSession(); setLoginOpen(false) }} success={login} continueAsGuest={() => { startGuestSession(); setLoginOpen(false); setCheckoutMode('guest'); if (cart.length) go('checkout') }} /></>}
+      {loginOpen && <><div className="scrim" onClick={() => { startGuestSession(); setLoginOpen(false) }}/><AccountAccess close={() => { startGuestSession(); setLoginOpen(false) }} success={login} continueAsGuest={() => { startGuestSession(); setGuestSessionActive(true); setLoginOpen(false); setCheckoutMode('guest'); if (cart.length) go('checkout') }} /></>}
       {faqOpen && <><div className="faq-scrim" onClick={() => setFaqOpen(false)}/><section className="faq-modal" role="dialog" aria-modal="true" aria-labelledby="faq-heading"><header><div><span className="eyebrow">Here to help</span><h2 id="faq-heading">Frequently asked questions</h2><p>Everything you need to know about shopping with Shilp &amp; Soul.</p></div><button type="button" className="icon-button" onClick={() => setFaqOpen(false)} aria-label="Close FAQs"><Icon name="close"/></button></header><div className="faq-list"><details open><summary>What kind of products does Shilp &amp; Soul offer?</summary><p>We curate Indian-made wall decorations, hand-painted dining pieces, devotional décor, embroidered potli bags, clutches, handbags, shirts and kurtis. The collection includes Bandhej, Patola, Laharia, gota, zari, brocade, carved wood and painted craft traditions.</p></details><details><summary>Are handmade pieces exactly identical?</summary><p>No. Small variations in colour, weave, embroidery, carving and painted detail are part of handmade production. They make each piece individual without affecting its intended use or quality.</p></details><details><summary>How much does delivery cost?</summary><p>Delivery is complimentary when your merchandise subtotal is S$30 or more. A delivery charge of S$5 applies below that amount and is shown before you place the order.</p></details><details><summary>Can I place an order without creating an account?</summary><p>Yes. Guest checkout is available when the store is live. You will need to verify your selected email or SMS destination before placing the order.</p></details><details><summary>Which payment methods are accepted?</summary><p>Online checkout is securely handled by Stripe and currently supports cards and PayNow when available. Stripe may request an email address for its payment confirmation even when your store updates are sent by SMS.</p></details><details><summary>How will I receive order updates?</summary><p>You can select email or SMS. Registered customers use a verified contact saved to their account; guests confirm the selected destination during checkout.</p></details><details><summary>How can I track my order?</summary><p>Customers can sign in and open “My orders.” Guests can select “Track order” and enter the order number plus the email address, SMS number used at checkout.</p></details><details><summary>Can I cancel an order?</summary><p>A cancellation request can be raised while an order is pending, confirmed or processing. Requests are sent to the seller for review and are not automatically approved.</p></details><details><summary>Can I return an item?</summary><p>Eligible delivered items can be submitted for return review from your order details. The applicable return window is associated with the order, and the seller reviews each request before approval.</p></details><details><summary>What if the product I want is not listed?</summary><p>Search through the Shilp assistant. If no matching item is found, registered customers can share a product request with our buying and support team for personalised assistance.</p></details><details><summary>Why are some products available only in small quantities?</summary><p>Many pieces are sourced or produced in small batches. Stock shown on each product, including available colour quantities, reflects the current product master and may be limited.</p></details></div></section></>}
       {contactOpen && <ContactModal close={() => setContactOpen(false)} user={user} />}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
