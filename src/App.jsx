@@ -199,7 +199,7 @@ const Icon = ({ name, size = 20 }) => {
 function App() {
   const [view, setView] = useState(initialView)
   const [cartOpen, setCartOpen] = useState(false)
-  const [loginOpen, setLoginOpen] = useState(() => Boolean(new URLSearchParams(window.location.search).get('invitation')))
+  const [loginOpen, setLoginOpen] = useState(() => Boolean(new URLSearchParams(window.location.search).get('invitation') || new URLSearchParams(window.location.hash.replace(/^#/, '')).get('invitation')))
   const [faqOpen, setFaqOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const [user, setUser] = useState(getSessionUser)
@@ -223,6 +223,24 @@ function App() {
   const syncingGuestCart = useRef(false)
 
   useEffect(() => removeLegacyUserCarts(), [])
+
+  useEffect(() => {
+    let active = true
+    authApi.session().then((session) => {
+      if (!active) return
+      saveSession(session)
+      setUser(session.user)
+      setSessionIdentity(session.user.id)
+      setCheckoutMode('customer')
+    }).catch(() => {
+      if (!active) return
+      startGuestSession()
+      setUser(null)
+      setSessionIdentity(getGuestSessionId())
+      setCheckoutMode('guest')
+    })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     if (!toast) return undefined
@@ -515,7 +533,7 @@ function App() {
     let pending
     try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
     if (pending?.id) {
-      try { await paymentApi.releaseReservation(pending.id, pending.accessToken) } catch { /* The server timeout remains the fallback. */ }
+      try { await paymentApi.releaseReservation(pending.id, pending.csrfToken) } catch { /* The server timeout remains the fallback. */ }
       sessionStorage.removeItem(pendingKey)
     }
     let serverLogoutFailed = false
@@ -538,7 +556,7 @@ function App() {
     let pending
     try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
     if (pending?.id) {
-      try { await paymentApi.releaseReservation(pending.id, pending.accessToken) } catch { /* The server timeout remains the fallback. */ }
+      try { await paymentApi.releaseReservation(pending.id, pending.csrfToken) } catch { /* The server timeout remains the fallback. */ }
     }
     startNewGuestSession()
     setSessionIdentity(getGuestSessionId())
@@ -917,7 +935,7 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
       try { pending = JSON.parse(sessionStorage.getItem(pendingKey)) } catch { pending = null }
       if (pending?.id) {
         try {
-          const previousOrder = await paymentApi.orderResult(pending.id, pending.accessToken)
+          const previousOrder = await paymentApi.orderResult(pending.id)
           if (previousOrder.payment_status === 'PAID') {
             throw new Error('This payment is already complete. Open My orders to view the confirmed order.')
           }
@@ -941,10 +959,10 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
         }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
         const order = isLoggedIn ? await orderApi.checkout({ ...details, items }) : await orderApi.guestCheckout(details, items)
-        pending = { id: order.id, accessToken: order.order_access_token || '' }
+        pending = { id: order.id, csrfToken: order.order_access_csrf_token || '' }
         sessionStorage.setItem(pendingKey, JSON.stringify(pending))
       }
-      const result = await paymentApi.createStripeCheckout(pending.id, pending.accessToken)
+      const result = await paymentApi.createStripeCheckout(pending.id, pending.csrfToken)
       if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
       setVerificationId(null)
       setVerificationCode('')
@@ -963,9 +981,9 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
     try { savedPending = JSON.parse(sessionStorage.getItem(pendingStripeOrderKey(user?.id))) } catch { savedPending = null }
     const pending = confirmationReference || savedPending
     const resultRequest = sessionId
-      ? paymentApi.checkoutResult(sessionId, pending?.accessToken)
+      ? paymentApi.checkoutResult(sessionId)
       : pending?.id
-        ? paymentApi.orderResult(pending.id, pending.accessToken)
+        ? paymentApi.orderResult(pending.id)
         : Promise.reject(new Error('Order reference is unavailable. Please use order tracking to find your order.'))
     resultRequest
       .then((result) => {
@@ -979,7 +997,7 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
   if (confirmed) {
     const channel = confirmedOrder?.notification_channel === 'WHATSAPP' ? 'WhatsApp' : confirmedOrder?.notification_channel === 'SMS' ? 'SMS' : 'email'
     const paid = confirmedOrder?.payment_status === 'PAID'
-    const canShowOrderReference = isLoggedIn || Boolean(confirmationReference?.accessToken)
+    const canShowOrderReference = isLoggedIn || Boolean(confirmationReference?.csrfToken)
     return <main className="confirmation"><div className="success-mark"><Icon name="check" size={30}/></div><span className="eyebrow">{paid?'Order confirmed':'Confirming payment'}</span><h1>{paid?'Thank you for choosing':'Please wait while we confirm'}<br/><em>{paid?'handmade.':'your payment.'}</em></h1><p>{paid?`Your order has been received. We’ll send the details and delivery updates by ${channel}.`:'Your reserved items are held briefly while Stripe confirms payment.'}</p>{paid&&canShowOrderReference&&confirmedOrder?.order_number&&<div className="order-number"><span>Order number</span><strong>{confirmedOrder.order_number}</strong><button onClick={() => navigator.clipboard.writeText(confirmedOrder.order_number)}>Copy</button></div>}{paid&&!canShowOrderReference&&<p className="verification-note">Sign in to view this customer order in My orders.</p>}{confirmationError && <p className="payment-error" role="alert">{confirmationError}</p>}<div className="confirmation-actions"><button className="primary" onClick={() => paid ? go('shop') : window.location.reload()}>{paid?'Continue shopping':'Check again'}</button>{paid&&canShowOrderReference&&<button className="secondary" onClick={() => go(isLoggedIn ? 'orders' : 'track')}>{isLoggedIn ? 'View my orders' : 'Track this order'}</button>}</div></main>
   }
   return <main className="checkout-page"><div className="checkout-heading"><button className="back" onClick={() => go('shop')}>← Back to shop</button><span className="eyebrow">A simple final step</span><h1>Checkout</h1><p>No account needed. Choose how you’d like to continue.</p></div>
@@ -1099,7 +1117,7 @@ function TrackOrder() {
     setLoading(true); setError(''); setNotificationMessage('')
     try {
       const order = await orderApi.verifyTracking(trackingRequestId, trackingCode)
-      if (!order.order_access_token) throw new Error('Order access could not be established.')
+      if (!order.order_access_csrf_token) throw new Error('Order access could not be established.')
       setResult(order)
       setTrackingRequestId('')
       setTrackingCode('')
@@ -1124,12 +1142,12 @@ function TrackOrder() {
   }
   const resend = async () => {
     setLoading(true);setError('');setNotificationMessage('')
-    try{await orderApi.resendGuestSummary(result.id,result.order_access_token);const method=result.notification_channel==='WHATSAPP'?'WhatsApp':result.notification_channel==='SMS'?'SMS':'email';setNotificationMessage(`Order summary accepted for delivery by ${method}.`)}
+    try{await orderApi.resendGuestSummary(result.id,result.order_access_csrf_token);const method=result.notification_channel==='WHATSAPP'?'WhatsApp':result.notification_channel==='SMS'?'SMS':'email';setNotificationMessage(`Order summary accepted for delivery by ${method}.`)}
     catch(resendError){setError(resendError.message||'Unable to resend the order summary.')}finally{setLoading(false)}
   }
   const checkDelivery = async () => {
     setLoading(true);setError('');setNotificationMessage('')
-    try{const delivery=await orderApi.guestNotificationStatus(result.id,result.order_access_token);const event=delivery.provider_event?` (${delivery.provider_event.replaceAll('_',' ')})`:'';setNotificationMessage(`Notification status: ${delivery.status.toLowerCase()}${event}.${delivery.error?` ${delivery.error}`:''}`)}
+    try{const delivery=await orderApi.guestNotificationStatus(result.id);const event=delivery.provider_event?` (${delivery.provider_event.replaceAll('_',' ')})`:'';setNotificationMessage(`Notification status: ${delivery.status.toLowerCase()}${event}.${delivery.error?` ${delivery.error}`:''}`)}
     catch(statusError){setError(statusError.message||'Unable to check notification delivery.')}finally{setLoading(false)}
   }
   const requestGuestAction = async (actionType, item) => {
@@ -1137,7 +1155,7 @@ function TrackOrder() {
     if (reason === null) return
     setLoading(true);setError('');setNotificationMessage('')
     try {
-      await orderApi.requestGuestAction(result.id, result.order_access_token, { action_type: actionType, order_item_id: item?.id, quantity: item?.quantity, reason })
+      await orderApi.requestGuestAction(result.id, result.order_access_csrf_token, { action_type: actionType, order_item_id: item?.id, quantity: item?.quantity, reason })
       setResult((current) => ({ ...current, status: actionType === 'RETURN' ? 'RETURN_REVIEW' : 'CANCEL_REVIEW' }))
       setNotificationMessage(`${actionType === 'RETURN' ? 'Return' : 'Cancellation'} request sent to the seller for review.`)
     } catch (actionError) { setError(actionError.message || 'Unable to submit the request.') }

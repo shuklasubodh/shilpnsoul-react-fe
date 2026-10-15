@@ -53,7 +53,7 @@ function InvitationSetup({ token, close, success }) {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   useEffect(() => { authApi.invitation(token).then(setInvitation).catch((failure) => setError(failure.message)) }, [token])
-  const destinations = useMemo(() => invitation ? { ...(invitation.phone ? { SMS: invitation.phone } : {}), ...(invitation.whatsapp_number ? { WHATSAPP: invitation.whatsapp_number } : {}) } : {}, [invitation])
+  const destinations = useMemo(() => invitation ? { ...(String(invitation.role).toUpperCase() === 'ADMIN' ? { EMAIL: invitation.email } : {}), ...(invitation.phone ? { SMS: invitation.phone } : {}), ...(invitation.whatsapp_number ? { WHATSAPP: invitation.whatsapp_number } : {}) } : {}, [invitation])
   const channels = Object.keys(destinations)
   const submit = async (event) => {
     event.preventDefault(); setBusy(true); setError('')
@@ -80,10 +80,13 @@ function InvitationSetup({ token, close, success }) {
 export default function AccountAccess({ close, success, continueAsGuest }) {
   const [invitationToken] = useState(() => {
     const url = new URL(window.location.href)
-    const token = url.searchParams.get('invitation') || ''
+    const fragment = new URLSearchParams(url.hash.replace(/^#/, ''))
+    const token = fragment.get('invitation') || url.searchParams.get('invitation') || ''
     if (token) {
       url.searchParams.delete('invitation')
-      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+      fragment.delete('invitation')
+      const hash = fragment.toString()
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${hash ? `#${hash}` : ''}`)
     }
     return token
   })

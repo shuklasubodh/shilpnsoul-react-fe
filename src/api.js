@@ -1,4 +1,4 @@
-import { clearSession, getSessionToken } from './session'
+import { clearSession, getCsrfToken } from './session'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
 
@@ -23,17 +23,19 @@ const safeErrorMessage = (status, path, payload) => {
 
 async function request(path, options = {}) {
   const { auth = true, ...fetchOptions } = options
-  const token = auth ? getSessionToken() : null
+  const method = String(fetchOptions.method || 'GET').toUpperCase()
+  const csrfToken = !['GET', 'HEAD', 'OPTIONS'].includes(method) ? getCsrfToken() : ''
   const response = await fetch(`${API_BASE}${path}`, {
     ...fetchOptions,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
       ...fetchOptions.headers,
     },
   })
   const payload = await response.json().catch(() => ({}))
-  if (token && response.status === 401) {
+  if (auth && response.status === 401) {
     clearSession()
     window.dispatchEvent(new Event('auth:expired'))
   }
@@ -71,7 +73,7 @@ export const authApi = {
   invitation: (token) => request('/auth/invitations/inspect', { auth: false, method: 'POST', body: JSON.stringify({ invitation_token: token }) }),
   acceptInvitation: (details) => request('/auth/invitations/accept', { auth: false, method: 'POST', body: JSON.stringify(details) }),
   phoneAvailability: (countryCode, phone) => request(`/users/phone-availability?${new URLSearchParams({ country_code: countryCode, phone })}`, { auth: false }),
-  session: () => request('/auth/session'),
+  session: () => request('/auth/session', { auth: false }),
 }
 
 const listQuery = () => new URLSearchParams({
@@ -109,22 +111,21 @@ export const orderApi = {
   removeFromHistory: (orderId) => request(`/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' }),
   resendSummary: (orderId, channel) => request(`/orders/${encodeURIComponent(orderId)}/notifications/resend`, { method: 'POST', body: JSON.stringify({ channel }) }),
   notificationStatus: (orderId, channel) => request(`/orders/${encodeURIComponent(orderId)}/notifications/status?channel=${encodeURIComponent(channel)}`),
-  resendGuestSummary: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/resend`, { auth: false, method: 'POST', headers: { 'X-Order-Access-Token': accessToken } }),
-  guestNotificationStatus: (orderId, accessToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/status`, { auth: false, headers: { 'X-Order-Access-Token': accessToken } }),
+  resendGuestSummary: (orderId, csrfToken) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/resend`, { auth: false, method: 'POST', headers: { 'X-CSRF-Token': csrfToken } }),
+  guestNotificationStatus: (orderId) => request(`/orders/${encodeURIComponent(orderId)}/guest-notifications/status`, { auth: false }),
   track: (orderNumber, channel, destination) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ orderNumber, channel, destination }) }),
   verifyTracking: (trackingRequestId, code) => request('/orders/track', { auth: false, method: 'POST', body: JSON.stringify({ tracking_request_id: trackingRequestId, code }) }),
   requestAction: (orderId, details) => request(`/orders/${encodeURIComponent(orderId)}/actions`, { method: 'POST', body: JSON.stringify(details) }),
-  requestGuestAction: (orderId, accessToken, details) => request(`/orders/${encodeURIComponent(orderId)}/guest-actions`, { auth: false, method: 'POST', headers: { 'X-Order-Access-Token': accessToken }, body: JSON.stringify(details) }),
+  requestGuestAction: (orderId, csrfToken, details) => request(`/orders/${encodeURIComponent(orderId)}/guest-actions`, { auth: false, method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body: JSON.stringify(details) }),
 }
 
 export const paymentApi = {
-  createStripeCheckout: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
-  releaseReservation: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/release`, { method: 'POST', headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
-  checkoutResult: (sessionId, orderAccessToken = '') => {
-    const headers = orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined
-    return request('/payments/checkout-sessions/result', { method: 'POST', headers, body: JSON.stringify({ session_id: sessionId }) })
+  createStripeCheckout: (orderId, guestCsrfToken = '') => request(`/payments/orders/${encodeURIComponent(orderId)}/checkout`, { method: 'POST', headers: guestCsrfToken ? { 'X-CSRF-Token': guestCsrfToken } : undefined }),
+  releaseReservation: (orderId, guestCsrfToken = '') => request(`/payments/orders/${encodeURIComponent(orderId)}/release`, { method: 'POST', headers: guestCsrfToken ? { 'X-CSRF-Token': guestCsrfToken } : undefined }),
+  checkoutResult: (sessionId) => {
+    return request('/payments/checkout-sessions/result', { method: 'POST', body: JSON.stringify({ session_id: sessionId }) })
   },
-  orderResult: (orderId, orderAccessToken) => request(`/payments/orders/${encodeURIComponent(orderId)}/payment`, { headers: orderAccessToken ? { 'X-Order-Access-Token': orderAccessToken } : undefined }),
+  orderResult: (orderId) => request(`/payments/orders/${encodeURIComponent(orderId)}/payment`),
 }
 
 // Backed by the market_requirements table in the commerce API. Creation is

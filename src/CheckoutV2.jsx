@@ -214,7 +214,7 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
       try { pending = JSON.parse(sessionStorage.getItem(storageKey)) } catch { pending = null }
       if (pending?.id) {
         try {
-          const previousOrder = await paymentApi.orderResult(pending.id, pending.accessToken)
+          const previousOrder = await paymentApi.orderResult(pending.id)
           if (previousOrder.payment_status === 'PAID') throw new Error('This payment is already complete. Open your orders to view it.')
           if (previousOrder.status === 'CANCELLED') {
             sessionStorage.removeItem(storageKey)
@@ -233,10 +233,10 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
         const details = { shipping_name: data.get('name'), shipping_phone: toE164(phone), shipping_address: data.get('shippingAddress'), contact_email: destinations.EMAIL, contact_phone: destinations.SMS || '', contact_whatsapp: destinations.WHATSAPP || '', payment_method: 'STRIPE', notification_channels: ['EMAIL', ...extraChannels], verification_channels: selectedChannels, notification_verification_tokens: verificationTokens, verification_tokens: verificationTokens, customer_contact_updates: customerContactUpdates, verification_scope: isLoggedIn ? 'CUSTOMER' : 'ORDER_ONLY', ...(checkoutId ? { checkout_id: checkoutId } : {}) }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
         const order = isLoggedIn ? await orderApi.checkout({ ...details, items }) : await orderApi.guestCheckout(details, items)
-        pending = { id: order.id, accessToken: order.order_access_token || '' }
+        pending = { id: order.id, csrfToken: order.order_access_csrf_token || '' }
         sessionStorage.setItem(storageKey, JSON.stringify(pending))
       }
-      const result = await paymentApi.createStripeCheckout(pending.id, pending.accessToken)
+      const result = await paymentApi.createStripeCheckout(pending.id, pending.csrfToken)
       if (!result.checkout_url) throw new Error('The payment service did not return a checkout URL.')
       setVerificationIds({})
       setVerificationCodes({})
@@ -251,7 +251,7 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
     let saved
     try { saved = JSON.parse(sessionStorage.getItem(getPendingOrderStorageKey(user?.id))) } catch { saved = null }
     const pending = confirmationReference || saved
-    const request = sessionId ? paymentApi.checkoutResult(sessionId, pending?.accessToken) : pending?.id ? paymentApi.orderResult(pending.id, pending.accessToken) : Promise.reject(new Error('Order reference is unavailable.'))
+    const request = sessionId ? paymentApi.checkoutResult(sessionId) : pending?.id ? paymentApi.orderResult(pending.id) : Promise.reject(new Error('Order reference is unavailable.'))
     request.then((result) => {
       setConfirmedOrder(result)
       if (result.payment_status === 'PAID') onConfirm(pending)
@@ -261,7 +261,7 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
 
   if (confirmed) {
     const paid = confirmedOrder?.payment_status === 'PAID'
-    const canShowOrderReference = isLoggedIn || Boolean(confirmationReference?.accessToken)
+    const canShowOrderReference = isLoggedIn || Boolean(confirmationReference?.csrfToken)
     return <main className="confirmation"><div className="success-mark">✓</div><h1>{paid ? 'Thank you for choosing handmade.' : 'Confirming your payment.'}</h1><p>{paid ? 'Your order details will always be emailed, with any additional selected updates sent separately.' : 'Your reserved items are held briefly while Stripe confirms payment.'}</p>{paid && canShowOrderReference && confirmedOrder?.order_number && <div className="order-number"><span>Order number</span><strong>{confirmedOrder.order_number}</strong></div>}{paid && !canShowOrderReference && <p className="verification-note">Sign in to view this customer order in My orders.</p>}{error && <p className="payment-error">{error}</p>}<button className="primary" onClick={() => paid ? go(isLoggedIn ? 'orders' : 'track') : window.location.reload()}>{paid ? 'Continue' : 'Check again'}</button></main>
   }
 
