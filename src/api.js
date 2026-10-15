@@ -22,12 +22,12 @@ const safeErrorMessage = (status, path, payload) => {
 }
 
 async function request(path, options = {}) {
-  const { auth = true, ...fetchOptions } = options
+  const { auth = true, sameOrigin = false, ...fetchOptions } = options
   const method = String(fetchOptions.method || 'GET').toUpperCase()
   const csrfToken = !['GET', 'HEAD', 'OPTIONS'].includes(method) ? getCsrfToken() : ''
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${sameOrigin ? '' : API_BASE}${path}`, {
     ...fetchOptions,
-    credentials: 'include',
+    credentials: sameOrigin ? 'omit' : 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
@@ -84,7 +84,7 @@ const listQuery = () => new URLSearchParams({
 export const catalogApi = {
   products: () => request(`/products?${listQuery()}`, { auth: false }),
   categories: () => request(`/categories?${listQuery()}`, { auth: false }),
-  banners: () => request(`/banners?${listQuery()}`, { auth: false }),
+  banners: () => request(`/storefront-highlights?${listQuery()}`, { auth: false, sameOrigin: true }),
 }
 
 export const cartApi = {

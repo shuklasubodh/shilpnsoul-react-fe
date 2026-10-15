@@ -21,6 +21,7 @@
     }
   ],
   "rewrites": [
+    { "source": "/storefront-highlights", "destination": "https://shilpnsoul-backend-admin.vercel.app/api/banners" },
     { "source": "/privacy-policy", "destination": "/privacy-policy.html" },
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/data-deletion", "destination": "/data-deletion.html" },

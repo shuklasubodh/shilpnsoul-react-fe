@@ -6,6 +6,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      '/storefront-highlights': {
+        target: 'https://shilpnsoul-backend-admin.vercel.app',
+        changeOrigin: true,
+        secure: true,
+        rewrite: () => '/api/banners',
+      },
       '/api': {
         target: 'https://shilpnsoul-backend-admin.vercel.app',
         changeOrigin: true,
