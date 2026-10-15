@@ -39,7 +39,7 @@ const retryDelayMs = (failure) => {
 
 function Summary({ cart, total }) {
   const delivery = total >= 30 ? 0 : 5
-  return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map((item) => <div className="summary-item" key={`${item.id}:${item.productColorId ?? 'none'}`}><p><strong>{item.name}</strong><span>Quantity {item.quantity}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<div className="summary-lines"><p><span>Delivery</span><b>{delivery ? `S$${delivery.toFixed(2)}` : 'Complimentary'}</b></p></div><div className="summary-total"><span>Total</span><strong>S${(total + delivery).toFixed(2)}</strong></div></aside>
+  return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map((item) => <div className="summary-item summary-item--compact" key={`${item.id}:${item.productColorId ?? 'none'}`}><p><strong>{item.name}</strong><span>Quantity {item.quantity}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<div className="summary-lines"><p><span>Delivery</span><b>{delivery ? `S$${delivery.toFixed(2)}` : 'Complimentary'}</b></p></div><div className="summary-total"><span>Total</span><strong>S${(total + delivery).toFixed(2)}</strong></div></aside>
 }
 
 export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, confirmed, confirmationReference, go, onSignIn }) {
