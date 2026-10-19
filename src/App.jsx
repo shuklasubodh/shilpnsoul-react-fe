@@ -208,6 +208,7 @@ function App() {
   const [sessionIdentity, setSessionIdentity] = useState(() => user?.id || getGuestSessionId())
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
+  const [shopOrigin, setShopOrigin] = useState('all')
   const [banners, setBanners] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
@@ -221,6 +222,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [footerFeature, setFooterFeature] = useState(null)
   const syncingGuestCart = useRef(false)
+  const diwaliOrigin = products.map((product) => String(product.place || '').trim()).find((place) => place.toLowerCase() === 'diwali') || 'Diwali'
 
   useEffect(() => removeLegacyUserCarts(), [])
 
@@ -481,6 +483,7 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const showProducts = () => {
+    setShopOrigin(diwaliOrigin)
     setView('shop')
     setCartOpen(false)
     if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
@@ -594,8 +597,8 @@ function App() {
         <button className="brand" onClick={() => go('home')}><span>shilp</span><i>&</i><span>soul</span></button>
         <nav aria-label="Main navigation">
           <button className={view === 'home' ? 'active' : ''} onClick={() => go('home')}>Home</button>
-          <button className={view === 'shop' ? 'active' : ''} onClick={() => go('shop')}>Shop</button>
-          <button onClick={() => go('shop')}>New arrivals</button>
+          <button className={view === 'shop' ? 'active' : ''} onClick={showProducts}>Shop</button>
+          <button onClick={showProducts}>New arrivals</button>
           <button className={view === 'team' ? 'active' : ''} onClick={() => { setFooterFeature('makers'); go('team') }}>Soul Team</button>
           {!isLoggedIn && <button onClick={() => go('track')}>Track order</button>}
           {isLoggedIn && <button onClick={() => go('orders')}>My orders</button>}
@@ -611,7 +614,7 @@ function App() {
       {['home', 'shop', 'team', 'track'].includes(view) && <div className="launch-banner" role="status" aria-label={LAUNCH_SPECIAL_MESSAGE}><div className="launch-banner-track"><span>{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span></div></div>}
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setView('shop') }} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
-      {(view === 'home' || view === 'shop' || view === 'team') && <Shop mode={view} products={products} categories={categories} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
+      {(view === 'home' || view === 'shop' || view === 'team') && <Shop mode={view} products={products} categories={categories} origin={shopOrigin} setOrigin={setShopOrigin} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
       {view === 'checkout' && <CheckoutV2 key={sessionIdentity} cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} onSignIn={() => setLoginOpen(true)} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
@@ -635,9 +638,8 @@ function App() {
   )
 }
 
-function Shop({ mode, products, categories, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts, footerFeature }) {
+function Shop({ mode, products, categories, origin, setOrigin, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts, footerFeature }) {
   const [categoryId, setCategoryId] = useState('all')
-  const [origin, setOrigin] = useState('all')
   const [productPage, setProductPage] = useState(1)
   const [showAllProducts, setShowAllProducts] = useState(false)
   const [heroIndex, setHeroIndex] = useState(0)
