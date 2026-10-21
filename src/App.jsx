@@ -176,6 +176,8 @@ const productImages = (product) => {
   return /^https?:\/\//i.test(String(product.image_url)) ? [product.image_url] : []
 }
 
+const isLatestProduct = (product) => ['T', 'TRUE', '1', 'Y'].includes(String(product.latest || '').trim().toUpperCase())
+
 const Icon = ({ name, size = 20 }) => {
   const paths = {
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
@@ -209,6 +211,8 @@ function App() {
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
   const [shopOrigin, setShopOrigin] = useState('all')
+  const [latestOnly, setLatestOnly] = useState(false)
+  const [shopResetKey, setShopResetKey] = useState(0)
   const [banners, setBanners] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
@@ -222,7 +226,6 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [footerFeature, setFooterFeature] = useState(null)
   const syncingGuestCart = useRef(false)
-  const diwaliOrigin = products.map((product) => String(product.place || '').trim()).find((place) => place.toLowerCase() === 'diwali') || 'Diwali'
 
   useEffect(() => removeLegacyUserCarts(), [])
 
@@ -483,13 +486,26 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const showProducts = () => {
-    setShopOrigin(diwaliOrigin)
+    setLatestOnly(true)
+    setShopResetKey((key) => key + 1)
+    setShopOrigin(products.find((product) => isLatestProduct(product) && String(product.place || '').trim())?.place || 'all')
+    setView('shop')
+    setCartOpen(false)
+    if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const showLatestProducts = () => {
+    setLatestOnly(true)
+    setShopResetKey((key) => key + 1)
+    setShopOrigin(products.find((product) => isLatestProduct(product) && String(product.place || '').trim())?.place || 'all')
     setView('shop')
     setCartOpen(false)
     if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const openSearch = () => {
+    setLatestOnly(false)
+    setShopOrigin('all')
     setView('shop')
     setSearchOpen(true)
     window.requestAnimationFrame(() => document.querySelector('.site-search input')?.focus())
@@ -598,7 +614,7 @@ function App() {
         <nav aria-label="Main navigation">
           <button className={view === 'home' ? 'active' : ''} onClick={() => go('home')}>Home</button>
           <button className={view === 'shop' ? 'active' : ''} onClick={showProducts}>Shop</button>
-          <button onClick={showProducts}>New arrivals</button>
+          <button onClick={showLatestProducts}>New arrivals</button>
           <button className={view === 'team' ? 'active' : ''} onClick={() => { setFooterFeature('makers'); go('team') }}>Soul Team</button>
           {!isLoggedIn && <button onClick={() => go('track')}>Track order</button>}
           {isLoggedIn && <button onClick={() => go('orders')}>My orders</button>}
@@ -614,7 +630,7 @@ function App() {
       {['home', 'shop', 'team', 'track'].includes(view) && <div className="launch-banner" role="status" aria-label={LAUNCH_SPECIAL_MESSAGE}><div className="launch-banner-track"><span>{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span></div></div>}
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setView('shop') }} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
-      {(view === 'home' || view === 'shop' || view === 'team') && <Shop mode={view} products={products} categories={categories} origin={shopOrigin} setOrigin={setShopOrigin} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
+      {(view === 'home' || view === 'shop' || view === 'team') && <Shop key={`${view}-${shopResetKey}`} mode={view} products={products} categories={categories} origin={shopOrigin} setOrigin={setShopOrigin} latestOnly={latestOnly} browseLatestCollection={() => setLatestOnly(true)} browseFullCollection={() => setLatestOnly(false)} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} showLatestProducts={showLatestProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
       {view === 'checkout' && <CheckoutV2 key={sessionIdentity} cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} onSignIn={() => setLoginOpen(true)} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
@@ -638,20 +654,23 @@ function App() {
   )
 }
 
-function Shop({ mode, products, categories, origin, setOrigin, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts, footerFeature }) {
+function Shop({ mode, products, categories, origin, setOrigin, latestOnly, browseLatestCollection, browseFullCollection, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts, showLatestProducts, footerFeature }) {
   const [categoryId, setCategoryId] = useState('all')
   const [productPage, setProductPage] = useState(1)
   const [showAllProducts, setShowAllProducts] = useState(false)
+  const [categorySidebarOpen, setCategorySidebarOpen] = useState(true)
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(hasConstrainedConnection)
   const [heroSource, updateHeroSource] = useState(() => localStorage.getItem('heroImageSource') === 'banner' ? 'banner' : 'product')
   const [activeStory, setActiveStory] = useState(null)
-  const productSlides = useMemo(() => products.flatMap((product) => product.images.map((image, index) => ({
-    id: `product-${product.id}-${index}`,
-    image,
-    label: product.name,
-    alt: `${product.name}${product.images.length > 1 ? `, image ${index + 1}` : ''}`,
-  }))), [products])
+  const productSlides = useMemo(() => products
+    .filter(isLatestProduct)
+    .flatMap((product) => product.images.map((image, index) => ({
+      id: `product-${product.id}-${index}`,
+      image,
+      label: product.name,
+      alt: `${product.name}${product.images.length > 1 ? `, image ${index + 1}` : ''}`,
+    }))), [products])
   const bannerSlides = useMemo(() => banners.map((banner) => ({
     id: `banner-${banner.id}`,
     image: banner.blob_url,
@@ -691,13 +710,32 @@ function Shop({ mode, products, categories, origin, setOrigin, banners, loading,
     const timer = window.setTimeout(preloadNext, 1200)
     return () => window.clearTimeout(timer)
   }, [activeStory, heroIndex, heroSlides])
+  const latestProducts = useMemo(() => products.filter(isLatestProduct), [products])
+  const collectionProducts = latestOnly ? latestProducts : products
   const categoryFilteredProducts = categoryId === 'all'
-    ? products
-    : products.filter((product) => String(product.category_id) === categoryId)
-  const origins = useMemo(() => [...new Set(products.map((product) => String(product.place || '').trim()).filter(Boolean))].sort((first, second) => first.localeCompare(second)), [products])
-  const originFilteredProducts = origin === 'all'
+    ? collectionProducts
+    : collectionProducts.filter((product) => String(product.category_id) === categoryId)
+  const latestOrigins = useMemo(() => [...new Set(latestProducts.map((product) => String(product.place || '').trim()).filter(Boolean))].sort((first, second) => first.localeCompare(second)), [latestProducts])
+  const sidebarOrigins = useMemo(() => [...new Set(products.map((product) => String(product.place || '').trim()).filter(Boolean))].sort((first, second) => first.localeCompare(second)), [products])
+  const topOrigins = latestOnly ? latestOrigins : sidebarOrigins
+  const selectedOrigin = latestOnly && !latestOrigins.includes(origin) ? latestOrigins[0] || 'all' : origin
+  const topCategories = useMemo(() => {
+    const normalizedOrigin = String(selectedOrigin).trim().toLowerCase()
+    const availableCategoryIds = new Set((latestOnly ? latestProducts : products)
+      .filter((product) => normalizedOrigin === 'all' || String(product.place || '').trim().toLowerCase() === normalizedOrigin)
+      .map((product) => String(product.category_id)))
+    return categories.filter((category) => availableCategoryIds.has(String(category.id)))
+  }, [categories, latestOnly, latestProducts, products, selectedOrigin])
+  const sidebarCategories = useMemo(() => {
+    const normalizedOrigin = String(selectedOrigin).trim().toLowerCase()
+    const availableCategoryIds = new Set(products
+      .filter((product) => normalizedOrigin === 'all' || String(product.place || '').trim().toLowerCase() === normalizedOrigin)
+      .map((product) => String(product.category_id)))
+    return categories.filter((category) => availableCategoryIds.has(String(category.id)))
+  }, [categories, products, selectedOrigin])
+  const originFilteredProducts = selectedOrigin === 'all'
     ? categoryFilteredProducts
-    : categoryFilteredProducts.filter((product) => String(product.place || '').trim() === origin)
+    : categoryFilteredProducts.filter((product) => String(product.place || '').trim() === selectedOrigin)
   const normalizedSearch = searchQuery.trim().toLowerCase()
   const visibleProducts = normalizedSearch
     ? originFilteredProducts.filter((product) => `${product.name} ${product.craft} ${product.description || ''}`.toLowerCase().includes(normalizedSearch))
@@ -706,13 +744,18 @@ function Shop({ mode, products, categories, origin, setOrigin, banners, loading,
   const pageCount = Math.max(1, Math.ceil(visibleProducts.length / pageSize))
   const currentPage = Math.min(productPage, pageCount)
   const pagedProducts = showAllProducts ? visibleProducts : visibleProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize)
-  const selectCategory = (id) => {
+  const selectCategory = (id, source) => {
+    if (source === 'sidebar') browseFullCollection()
+    else if (latestOnly && !latestOrigins.includes(origin)) setOrigin(latestOrigins[0] || 'all')
     setCategoryId(id)
     setProductPage(1)
     setShowAllProducts(false)
   }
-  const selectOrigin = (event) => {
-    setOrigin(event.target.value)
+  const selectOrigin = (event, source) => {
+    const nextOrigin = event.target.value
+    if (source === 'sidebar') browseFullCollection()
+    setOrigin(nextOrigin)
+    setCategoryId('all')
     setProductPage(1)
     setShowAllProducts(false)
   }
@@ -720,9 +763,21 @@ function Shop({ mode, products, categories, origin, setOrigin, banners, loading,
     setProductPage(page)
     setShowAllProducts(false)
   }
-  const viewAllProducts = () => {
+  const selectProductScope = (scope) => {
+    if (scope === 'latest') {
+      browseLatestCollection()
+      setOrigin(latestOrigins[0] || 'all')
+    } else {
+      browseFullCollection()
+      setOrigin('all')
+    }
     setCategoryId('all')
-    setOrigin('all')
+    setProductPage(1)
+    setShowAllProducts(false)
+  }
+  const viewAllProducts = () => {
+    setOrigin(selectedOrigin)
+    setCategoryId('all')
     setProductPage(1)
     setShowAllProducts(true)
   }
@@ -730,17 +785,21 @@ function Shop({ mode, products, categories, origin, setOrigin, banners, loading,
   return <main>
     {mode === 'home' && !normalizedSearch && <><section className={`hero-section${activeStory ? ' story-active' : ''}${!activeStory && heroSource === 'product' ? ' hero-product-active' : ''}`}>
       <div className="hero-copy"><span className="eyebrow">{activeStory?.eyebrow || 'Handmade for the everyday'}</span><h1>{activeStory?.heading || <>Live with things<br/><em>that have a soul.</em></>}</h1><p>{activeStory?.text || 'Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.'}</p><button className="primary" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div>
-      <div className="hero-art">{displayedHero ? <OptimizedImage className="hero-image" src={displayedHero.image} alt={activeStory ? `${activeStory.title}, Shilp & Soul craft story` : heroSlide?.alt || 'Handcrafted home decor'} priority width={1200} height={675} sizes="(max-width: 850px) 100vw, 52vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/> : <div className="hero-image" role="img" aria-label="Handcrafted home decor"/>}<div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={!activeStory && heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={!activeStory && heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div>{!activeStory && <div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div>}<div className="maker-note"><span>{activeStory ? `Our story · ${activeStory.number}` : heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{activeStory?.title || heroSlide?.label || (heroSource === 'banner' ? loading ? 'Loading featured banners…' : 'Featured banners unavailable' : 'Objects made with care')}</strong><button aria-label="Open Shop" onClick={showProducts}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
+      <div className="hero-art">{displayedHero ? <OptimizedImage className="hero-image" src={displayedHero.image} alt={activeStory ? `${activeStory.title}, Shilp & Soul craft story` : heroSlide?.alt || 'Handcrafted home decor'} priority width={1200} height={675} sizes="(max-width: 850px) 100vw, 52vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/> : <div className="hero-image" role="img" aria-label="Handcrafted home decor"/>}<div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={!activeStory && heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={!activeStory && heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div>{!activeStory && <div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div>}<div className="maker-note"><span>{activeStory ? `Our story · ${activeStory.number}` : heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{activeStory?.title || heroSlide?.label || (heroSource === 'banner' ? loading ? 'Loading featured banners…' : 'Featured banners unavailable' : 'Objects made with care')}</strong><button aria-label={heroSource === 'product' ? 'Open New arrivals' : 'Open Shop'} onClick={heroSource === 'product' ? showLatestProducts : showProducts}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
     </section>
     <section className="story-strip" aria-label="The Shilp & Soul approach">{STORE_STORIES.map((story) => <button type="button" className={activeStory?.number === story.number ? 'selected' : ''} aria-pressed={activeStory?.number === story.number} onClick={() => { setActiveStory(story); setHeroPaused(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }} key={story.number}><span>{story.number}</span> {story.title}</button>)}</section></>}
     {mode === 'shop' && <section className={`collection${normalizedSearch ? ' search-results' : ''}`} id="products">
       <div className="section-head"><div><span className="eyebrow">{normalizedSearch ? 'Search results' : 'Curated for you'}</span><h2>{normalizedSearch ? `${visibleProducts.length} ${visibleProducts.length === 1 ? 'piece' : 'pieces'} found` : 'Objects of quiet beauty'}</h2></div>{!normalizedSearch && <button type="button" onClick={viewAllProducts}>View all pieces <Icon name="arrow" size={17}/></button>}</div>
+      <div className={`category-drawer${categorySidebarOpen ? ' open' : ''}`}>
+        <aside id="category-drawer-panel" aria-label="Product filters sidebar"><div className="category-drawer-head"><span>Filter by</span><strong>Product category</strong></div><label className="category-drawer-origin"><span>Place of Origin</span><select value={selectedOrigin} onChange={(event) => selectOrigin(event, 'sidebar')}><option value="all">All places</option>{sidebarOrigins.map((place) => <option value={place} key={place}>{place}</option>)}</select></label><div className="category-drawer-options"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => selectCategory('all', 'sidebar')}>All objects</button>{sidebarCategories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => selectCategory(String(category.id), 'sidebar')} key={category.id}>{category.name}</button>)}</div></aside>
+        <button type="button" className="category-drawer-toggle" aria-controls="category-drawer-panel" aria-expanded={categorySidebarOpen} onClick={() => setCategorySidebarOpen((open) => !open)}><Icon name={categorySidebarOpen ? 'close' : 'menu'} size={17}/><span>Filters</span></button>
+      </div>
       <div className="catalog-toolbar">
+        <fieldset className="catalog-scope-filter"><legend>Products</legend><label><input type="radio" name="catalog-scope" checked={latestOnly} onChange={() => selectProductScope('latest')}/> Latest</label><label><input type="radio" name="catalog-scope" checked={!latestOnly} onChange={() => selectProductScope('all')}/> All Products</label></fieldset>
         <div className="catalog-filter-groups">
-          <div className="filters" aria-label="Product categories"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => selectCategory('all')}>All objects</button>{categories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => selectCategory(String(category.id))} key={category.id}>{category.name}</button>)}</div>
-          <label className="origin-filter"><span>Place of Origin</span><select value={origin} onChange={selectOrigin}><option value="all">All places</option>{origins.map((place) => <option value={place} key={place}>{place}</option>)}</select></label>
+          <div className="filters" aria-label={`${latestOnly ? 'Latest' : 'All'} product categories`}><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => selectCategory('all', 'top')}>All objects</button>{topCategories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => selectCategory(String(category.id), 'top')} key={category.id}>{category.name}</button>)}</div>
+          <label className="origin-filter"><span>Place of Origin</span><select value={selectedOrigin === 'all' ? 'all' : selectedOrigin} onChange={(event) => selectOrigin(event, 'top')} disabled={topOrigins.length === 0}>{!latestOnly && <option value="all">All places</option>}{latestOnly && topOrigins.length === 0 && <option value="all">No eligible places</option>}{topOrigins.map((place) => <option value={place} key={place}>{place}</option>)}</select></label>
         </div>
-        {!showAllProducts && pageCount > 1 && <nav className="product-pagination" aria-label="Product pages"><button type="button" disabled={currentPage === 1} onClick={() => changeProductPage(currentPage - 1)} aria-label="Previous product page">‹</button>{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" className={page === currentPage ? 'selected' : ''} aria-current={page === currentPage ? 'page' : undefined} onClick={() => changeProductPage(page)} key={page}>{page}</button>)}<button type="button" disabled={currentPage === pageCount} onClick={() => changeProductPage(currentPage + 1)} aria-label="Next product page">›</button></nav>}
       </div>
       {loading && <div className="catalog-status" role="status">Loading the collection…</div>}
       {error && <div className="catalog-status error" role="alert">{error}</div>}
