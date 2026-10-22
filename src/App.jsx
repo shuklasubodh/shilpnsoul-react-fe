@@ -658,11 +658,19 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
   const [categoryId, setCategoryId] = useState('all')
   const [productPage, setProductPage] = useState(1)
   const [showAllProducts, setShowAllProducts] = useState(false)
-  const [categorySidebarOpen, setCategorySidebarOpen] = useState(true)
+  const [categorySidebarOpen, setCategorySidebarOpen] = useState(() => window.matchMedia('(min-width: 851px)').matches)
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(hasConstrainedConnection)
   const [heroSource, updateHeroSource] = useState(() => localStorage.getItem('heroImageSource') === 'banner' ? 'banner' : 'product')
   const [activeStory, setActiveStory] = useState(null)
+  useEffect(() => {
+    const desktopDrawer = window.matchMedia('(min-width: 851px)')
+    const closeOverlayDrawer = (event) => {
+      if (!event.matches) setCategorySidebarOpen(false)
+    }
+    desktopDrawer.addEventListener('change', closeOverlayDrawer)
+    return () => desktopDrawer.removeEventListener('change', closeOverlayDrawer)
+  }, [])
   const productSlides = useMemo(() => products
     .filter(isLatestProduct)
     .flatMap((product) => product.images.map((image, index) => ({
