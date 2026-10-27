@@ -15,7 +15,6 @@ const STRIPE_PAYMENTS_ENABLED = import.meta.env.VITE_STRIPE_PAYMENTS_ENABLED ===
 const DELIVERY_FEE = 5
 const FREE_DELIVERY_THRESHOLD = 30
 const LAUNCH_SPECIAL_MESSAGE = 'Launch special: Order for S$30/- and receive free delivery'
-
 const deliveryChargeFor = subtotal => subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE
 const REGISTRATION_CHANNELS = WHATSAPP_ENABLED ? ['EMAIL', 'SMS', 'WHATSAPP'] : ['EMAIL', 'SMS']
 const LEGACY_GUEST_CART_KEY = 'shoppingCart:guest'
@@ -23,7 +22,9 @@ const GUEST_CART_TTL_MS = 10 * 60 * 1000
 const pendingStripeOrderKey = getPendingOrderStorageKey
 const paymentReturn = () => window.location.pathname.replace(/\/$/, '')
 const isStripeSuccessReturn = () => paymentReturn() === '/payment/success' || new URLSearchParams(window.location.search).has('session_id')
-const initialView = () => window.location.pathname === '/admin/market-requirements' ? 'requirements-admin' : paymentReturn() === '/payment/cancel' || isStripeSuccessReturn() ? 'checkout' : 'home'
+const LEGAL_VIEW_BY_PATH = { '/privacy-policy': 'privacy-policy', '/terms': 'terms-of-service', '/data-deletion': 'data-deletion' }
+const LEGAL_PATH_BY_VIEW = Object.fromEntries(Object.entries(LEGAL_VIEW_BY_PATH).map(([path, view]) => [view, path]))
+const initialView = () => window.location.pathname === '/admin/market-requirements' ? 'requirements-admin' : paymentReturn() === '/payment/cancel' || isStripeSuccessReturn() ? 'checkout' : LEGAL_VIEW_BY_PATH[paymentReturn()] || 'home'
 const toE164 = (value, defaultCountryCode = '65') => {
   const raw = String(value || '').trim()
   const digits = raw.replace(/\D/g, '')
@@ -212,6 +213,8 @@ function App() {
   const [categories, setCategories] = useState([])
   const [shopOrigin, setShopOrigin] = useState('all')
   const [latestOnly, setLatestOnly] = useState(false)
+  const [catalogNav, setCatalogNav] = useState('shop')
+  const [focusedProductId, setFocusedProductId] = useState(null)
   const [shopResetKey, setShopResetKey] = useState(0)
   const [banners, setBanners] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(true)
@@ -288,6 +291,16 @@ function App() {
   }, [user])
 
   useEffect(() => {
+    const routeLegalPage = () => {
+      const legalView = LEGAL_VIEW_BY_PATH[paymentReturn()]
+      setView((current) => legalView || (LEGAL_PATH_BY_VIEW[current] ? 'home' : current))
+      window.scrollTo({ top: 0 })
+    }
+    window.addEventListener('popstate', routeLegalPage)
+    return () => window.removeEventListener('popstate', routeLegalPage)
+  }, [])
+
+  useEffect(() => {
     let active = true
     const loadCatalog = async () => {
       try {
@@ -312,6 +325,8 @@ function App() {
               images,
               price: Number(product.price),
               stock: Number(product.stock_quantity),
+              trend_count: Number(product.trend_count || 0),
+              hearted: false,
               image: images[0] || FALLBACK_IMAGE,
               craft: categoryNames.get(String(product.category_id)) || 'Uncategorised',
             }
@@ -483,32 +498,91 @@ function App() {
   const go = (next) => {
     setView(next)
     setCartOpen(false)
+    const legalPath = LEGAL_PATH_BY_VIEW[next]
+    if (legalPath && window.location.pathname !== legalPath) window.history.pushState({}, '', legalPath)
+    else if (!legalPath && LEGAL_VIEW_BY_PATH[paymentReturn()]) window.history.pushState({}, '', '/')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const showProducts = () => {
+    setFocusedProductId(null)
+    setCatalogNav('shop')
     setLatestOnly(true)
     setShopResetKey((key) => key + 1)
-    setShopOrigin(products.find((product) => isLatestProduct(product) && String(product.place || '').trim())?.place || 'all')
+    setShopOrigin('all')
+    setView('shop')
+    setCartOpen(false)
+    if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const showShopProducts = () => {
+    setFocusedProductId(null)
+    setCatalogNav('shop')
+    setLatestOnly(false)
+    setSearchQuery('')
+    setSearchOpen(false)
+    setShopResetKey((key) => key + 1)
+    setShopOrigin('all')
     setView('shop')
     setCartOpen(false)
     if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const showLatestProducts = () => {
+    setFocusedProductId(null)
+    setCatalogNav('latest')
     setLatestOnly(true)
+    setSearchQuery('')
+    setSearchOpen(false)
     setShopResetKey((key) => key + 1)
-    setShopOrigin(products.find((product) => isLatestProduct(product) && String(product.place || '').trim())?.place || 'all')
+    setShopOrigin('all')
     setView('shop')
     setCartOpen(false)
     if (window.location.pathname !== '/') window.history.pushState({}, '', '/')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const openSearch = () => {
+    setFocusedProductId(null)
+    setCatalogNav('shop')
     setLatestOnly(false)
     setShopOrigin('all')
     setView('shop')
     setSearchOpen(true)
     window.requestAnimationFrame(() => document.querySelector('.site-search input')?.focus())
+  }
+  const openRegionCatalog = (origin) => {
+    setFocusedProductId(null)
+    setCatalogNav('shop')
+    setLatestOnly(false)
+    setShopOrigin(origin)
+    setShopResetKey((key) => key + 1)
+    setView('shop')
+    setCartOpen(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const openProductPage = (productId) => {
+    const product = products.find((item) => String(item.id) === String(productId))
+    if (!product) return
+    setFocusedProductId(product.id)
+    setCatalogNav('shop')
+    setLatestOnly(false)
+    setShopOrigin(product.place || 'all')
+    setShopResetKey((key) => key + 1)
+    setView('shop')
+    setCartOpen(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const heartProduct = async (product) => {
+    try {
+      const result = await catalogApi.heart(product.id, user ? '' : getGuestSessionId())
+      setProducts((current) => current.map((item) => String(item.id) === String(product.id) ? {
+        ...item,
+        trend_count: Number(result.trend_count || 0),
+        hearted: true,
+      } : item))
+      setToast(result.counted ? `${product.name} is trending.` : `Your heart for ${product.name} was already counted.`)
+    } catch (error) {
+      setToast(error.message || 'Unable to count this heart. Please try again.')
+    }
   }
   const toggleOurStory = () => {
     setFooterFeature((current) => {
@@ -613,11 +687,11 @@ function App() {
         <button className="brand" onClick={() => go('home')}><span>shilp</span><i>&</i><span>soul</span></button>
         <nav aria-label="Main navigation">
           <button className={view === 'home' ? 'active' : ''} onClick={() => go('home')}>Home</button>
-          <button className={view === 'shop' ? 'active' : ''} onClick={showProducts}>Shop</button>
-          <button onClick={showLatestProducts}>New arrivals</button>
+          <button className={view === 'shop' && catalogNav === 'shop' ? 'active' : ''} onClick={showShopProducts}>Shop</button>
+          <button className={view === 'shop' && catalogNav === 'latest' ? 'active' : ''} onClick={showLatestProducts}>New arrivals</button>
           <button className={view === 'team' ? 'active' : ''} onClick={() => { setFooterFeature('makers'); go('team') }}>Soul Team</button>
-          {!isLoggedIn && <button onClick={() => go('track')}>Track order</button>}
-          {isLoggedIn && <button onClick={() => go('orders')}>My orders</button>}
+          {!isLoggedIn && <button className={view === 'track' ? 'active' : ''} onClick={() => go('track')}>Track order</button>}
+          {isLoggedIn && <button className={view === 'orders' ? 'active' : ''} onClick={() => go('orders')}>My orders</button>}
         </nav>
         <div className="header-actions">
           <button className="icon-button search-button" aria-label="Search products" aria-expanded={searchOpen} onClick={() => searchOpen ? setSearchOpen(false) : openSearch()}><Icon name="search" /></button>
@@ -630,18 +704,24 @@ function App() {
       {['home', 'shop', 'team', 'track'].includes(view) && <div className="launch-banner" role="status" aria-label={LAUNCH_SPECIAL_MESSAGE}><div className="launch-banner-track"><span>{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span><span aria-hidden="true">{LAUNCH_SPECIAL_MESSAGE}</span></div></div>}
       {searchOpen && <div className="site-search"><label><Icon name="search" size={18}/><span className="sr-only">Search products or categories</span><input value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setView('shop') }} placeholder="Search products or categories…" /></label><button className="icon-button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} aria-label="Close search"><Icon name="close" size={18}/></button></div>}
 
-      {(view === 'home' || view === 'shop' || view === 'team') && <Shop key={`${view}-${shopResetKey}`} mode={view} products={products} categories={categories} origin={shopOrigin} setOrigin={setShopOrigin} latestOnly={latestOnly} browseLatestCollection={() => setLatestOnly(true)} browseFullCollection={() => setLatestOnly(false)} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} searchQuery={searchQuery} showProducts={showProducts} showLatestProducts={showLatestProducts} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
+      {(view === 'home' || view === 'shop' || view === 'team') && <Shop key={`${view}-${shopResetKey}`} mode={view} products={products} categories={categories} origin={shopOrigin} setOrigin={setShopOrigin} latestOnly={latestOnly} browseLatestCollection={() => setLatestOnly(true)} browseFullCollection={() => setLatestOnly(false)} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} heartProduct={heartProduct} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showProducts={showProducts} openRegionCatalog={openRegionCatalog} openProductPage={openProductPage} focusedProductId={focusedProductId} clearFocusedProduct={() => setFocusedProductId(null)} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
+      {LEGAL_PATH_BY_VIEW[view] && <LegalPage view={view} back={() => go('home')} contact={() => setContactOpen(true)} />}
       {view === 'checkout' && <CheckoutV2 key={sessionIdentity} cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} onSignIn={() => setLoginOpen(true)} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
       {view === 'orders' && <Orders products={products} />}
       {view === 'requirements-admin' && (isAdmin ? <MarketRequirementsAdmin user={user} /> : <main className="requirements-page"><div className="catalog-status error" role="alert">Admin access is required.</div></main>)}
 
-      <footer>
-        <div className="footer-brand"><div className="brand light"><span>shilp</span><i>&</i><span>soul</span></div><p>Objects with a story. Made slowly,<br/>chosen thoughtfully.</p></div>
-        <div><h4>Explore</h4><button type="button" onClick={toggleOurStory} aria-expanded={footerFeature === 'story'}>Our story</button><button type="button" onClick={toggleArtisans} aria-expanded={footerFeature === 'artisans'}>Artisans</button><button type="button" onClick={toggleJournal} aria-expanded={footerFeature === 'journal'}>Journal</button></div>
-        <div><h4>Help</h4><button type="button" onClick={() => setFaqOpen(true)} aria-haspopup="dialog">FAQs</button>{!isLoggedIn && <button onClick={() => go('track')}>Track an order</button>}<button type="button" onClick={() => setContactOpen(true)} aria-haspopup="dialog">Contact us</button><a href="/privacy-policy">Privacy policy</a><a href="/terms">Terms of service</a><a href="/data-deletion">Data deletion</a></div>
-        <MarketingSignup />
+      <footer className="site-footer">
+        <div className="footer-top-row">
+          <nav className="footer-link-group" aria-label="Explore footer links"><h4>Explore</h4><button type="button" onClick={toggleOurStory} aria-expanded={footerFeature === 'story'}>Our story</button><button type="button" onClick={toggleArtisans} aria-expanded={footerFeature === 'artisans'}>Artisan</button><button type="button" onClick={toggleJournal} aria-expanded={footerFeature === 'journal'}>Journal</button></nav>
+          <div className="footer-signature"><div className="brand light"><span>Shilp</span><i>&</i><span>Soul</span></div><p>(Objects with a story. Made slowly, chosen thoughtfully.)</p></div>
+          <nav className="footer-link-group footer-help-links" aria-label="Help footer links"><h4>Help</h4><button type="button" onClick={() => setFaqOpen(true)} aria-haspopup="dialog">FAQs</button>{!isLoggedIn && <button onClick={() => go('track')}>Track an order</button>}<button type="button" onClick={() => setContactOpen(true)} aria-haspopup="dialog">Contact us</button><button type="button" onClick={() => go('privacy-policy')}>Privacy policy</button><button type="button" onClick={() => go('terms-of-service')}>Terms of service</button><button type="button" onClick={() => go('data-deletion')}>Data deletion</button></nav>
+        </div>
+        <div className="footer-bottom-row">
+          <MarketingSignup />
+          {view !== 'requirements-admin' && <button type="button" className="footer-assistant-button" onClick={() => window.dispatchEvent(new Event('shop-assistant:open'))}><Icon name="chat" size={17}/><span>Can we help?</span></button>}
+        </div>
       </footer>
 
       {cartOpen && <><div className="scrim" onClick={() => setCartOpen(false)}/><CartDrawer cart={cart} total={total} updateQuantity={updateQuantity} close={() => setCartOpen(false)} checkout={() => isLoggedIn ? go('checkout') : (setCartOpen(false), setLoginOpen(true))} /></>}
@@ -649,16 +729,72 @@ function App() {
       {faqOpen && <><div className="faq-scrim" onClick={() => setFaqOpen(false)}/><section className="faq-modal" role="dialog" aria-modal="true" aria-labelledby="faq-heading"><header><div><span className="eyebrow">Here to help</span><h2 id="faq-heading">Frequently asked questions</h2><p>Everything you need to know about shopping with Shilp &amp; Soul.</p></div><button type="button" className="icon-button" onClick={() => setFaqOpen(false)} aria-label="Close FAQs"><Icon name="close"/></button></header><div className="faq-list"><details open><summary>What kind of products does Shilp &amp; Soul offer?</summary><p>We curate Indian-made wall decorations, hand-painted dining pieces, devotional décor, embroidered potli bags, clutches, handbags, shirts and kurtis. The collection includes Bandhej, Patola, Laharia, gota, zari, brocade, carved wood and painted craft traditions.</p></details><details><summary>Are handmade pieces exactly identical?</summary><p>No. Small variations in colour, weave, embroidery, carving and painted detail are part of handmade production. They make each piece individual without affecting its intended use or quality.</p></details><details><summary>How much does delivery cost?</summary><p>Delivery is complimentary when your merchandise subtotal is S$30 or more. A delivery charge of S$5 applies below that amount and is shown before you place the order.</p></details><details><summary>Can I place an order without creating an account?</summary><p>Yes. Guest checkout is available when the store is live. You will need to verify your selected email or SMS destination before placing the order.</p></details><details><summary>Which payment methods are accepted?</summary><p>Online checkout is securely handled by Stripe and currently supports cards and PayNow when available. Stripe may request an email address for its payment confirmation even when your store updates are sent by SMS.</p></details><details><summary>How will I receive order updates?</summary><p>You can select email or SMS. Registered customers use a verified contact saved to their account; guests confirm the selected destination during checkout.</p></details><details><summary>How can I track my order?</summary><p>Customers can sign in and open “My orders.” Guests can select “Track order” and enter the order number plus the email address, SMS number used at checkout.</p></details><details><summary>Can I cancel an order?</summary><p>A cancellation request can be raised while an order is pending, confirmed or processing. Requests are sent to the seller for review and are not automatically approved.</p></details><details><summary>Can I return an item?</summary><p>Eligible delivered items can be submitted for return review from your order details. The applicable return window is associated with the order, and the seller reviews each request before approval.</p></details><details><summary>What if the product I want is not listed?</summary><p>Search through the Shilp assistant. If no matching item is found, registered customers can share a product request with our buying and support team for personalised assistance.</p></details><details><summary>Why are some products available only in small quantities?</summary><p>Many pieces are sourced or produced in small batches. Stock shown on each product, including available colour quantities, reflects the current product master and may be limited.</p></details></div></section></>}
       {contactOpen && <ContactModal close={() => setContactOpen(false)} user={user} />}
       {toast && <div className="toast"><span><Icon name="check" size={16}/></span>{toast}</div>}
-      {view !== 'requirements-admin' && <ShopAssistant products={products} categories={categories} user={user} onSignIn={() => setLoginOpen(true)} />}
+      {view !== 'requirements-admin' && <ShopAssistant products={products} categories={categories} user={user} onSignIn={() => setLoginOpen(true)} showLauncher={false} />}
     </div>
   )
 }
 
-function Shop({ mode, products, categories, origin, setOrigin, latestOnly, browseLatestCollection, browseFullCollection, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, searchQuery, showProducts, showLatestProducts, footerFeature }) {
+function LegalPage({ view, back, contact }) {
+  const pages = {
+    'privacy-policy': {
+      eyebrow: 'Your information',
+      title: 'Privacy policy',
+      introduction: 'This policy explains the information Shilp & Soul collects when you browse, create an account, place an order, contact us or subscribe for updates, and how that information is handled.',
+      sections: [
+        ['Information we collect', 'We may collect your name, contact details, delivery and billing information, account details, order history, customer-service messages, newsletter preferences and technical session information. Payment information is processed by our payment provider and is not stored as a complete card number by Shilp & Soul.'],
+        ['How we use information', 'We use information to provide the store, process and deliver orders, manage accounts and carts, send requested service or marketing updates, prevent misuse, answer enquiries and improve the shopping experience.'],
+        ['When information is shared', 'Information may be shared only as needed with service providers supporting payments, delivery, communications, hosting, security and store operations, or when disclosure is required by applicable law.'],
+        ['Retention and security', 'We use reasonable administrative and technical safeguards. Information is retained only while it remains necessary for the purpose for which it was collected, store operations, dispute resolution, security, or applicable legal and accounting requirements.'],
+        ['Your choices', 'You may unsubscribe from marketing updates, ask about the personal information associated with you, request correction, or withdraw consent where applicable. Some information may still need to be retained when required for legitimate business or legal purposes.'],
+      ],
+    },
+    'terms-of-service': {
+      eyebrow: 'Shopping with us',
+      title: 'Terms of service',
+      introduction: 'These terms apply when you browse Shilp & Soul, create an account, or purchase products through the store. By using the store, you agree to use it lawfully and provide accurate information.',
+      sections: [
+        ['Products and availability', 'Handmade objects may have small variations in colour, texture, finish and dimensions. Product photographs are representative, and availability may change before an order is confirmed.'],
+        ['Orders and payment', 'An order is accepted after payment and inventory checks are completed and a confirmation is issued. We may contact you if an item is unavailable, information requires clarification, or an order cannot be fulfilled.'],
+        ['Prices and delivery', 'Prices, delivery charges and any applicable promotions are displayed during checkout. Delivery timing is an estimate and may be affected by carrier, customs, address or events outside our reasonable control.'],
+        ['Cancellations, returns and refunds', 'Available cancellation and return options depend on the order status, product condition and the policy shown with the order. Requests are reviewed before approval; approved refunds are returned through the available payment method.'],
+        ['Acceptable use', 'You must not misuse the store, interfere with its operation, attempt unauthorised access, submit fraudulent orders, or copy store content in a way that infringes intellectual-property rights.'],
+        ['Changes and questions', 'We may update these terms when store services or requirements change. The version shown here applies from its displayed update date. Contact us if you have a question before placing an order.'],
+      ],
+    },
+    'data-deletion': {
+      eyebrow: 'Your data choices',
+      title: 'Data deletion requests',
+      introduction: 'You can ask us to review and delete personal information connected with your account or guest activity. We will assess the request and explain what can be removed and what must be retained.',
+      sections: [
+        ['How to make a request', 'Use the Contact us button below and choose the email address associated with your account or order. Include enough information to locate your records, such as an order reference. Never send a password or full payment-card number.'],
+        ['Identity confirmation', 'Before acting on a request, we may ask for reasonable information to confirm that the request concerns you and to protect customer records from unauthorised deletion.'],
+        ['Information that may be retained', 'Certain transaction, payment, fraud-prevention, dispute, tax or accounting records may need to be retained for legitimate business or legal purposes. Withdrawal of consent does not always require immediate destruction of every existing record.'],
+        ['What happens next', 'We will acknowledge the request, review the relevant systems and respond with the outcome or any information needed to continue. Where deletion is appropriate, the affected information will be removed or anonymised from active use.'],
+      ],
+    },
+  }
+  const page = pages[view]
+  return <main className="legal-page">
+    <header className="legal-page-hero">
+      <button type="button" className="legal-back" onClick={back}><Icon name="arrow" size={16}/> Back to home</button>
+      <span className="eyebrow">{page.eyebrow}</span>
+      <h1>{page.title}</h1>
+      <p>{page.introduction}</p>
+      <small>Last updated: 27 October 2026</small>
+    </header>
+    <div className="legal-page-content">
+      {page.sections.map(([heading, copy], index) => <section key={heading}><span>{String(index + 1).padStart(2, '0')}</span><div><h2>{heading}</h2><p>{copy}</p></div></section>)}
+      <aside><div><span className="eyebrow">Need help?</span><h2>Talk to Shilp &amp; Soul</h2><p>Send us your question or data request and our team will respond using the contact details you provide.</p></div><button type="button" className="primary" onClick={contact}>Contact us <Icon name="arrow" size={17}/></button></aside>
+    </div>
+  </main>
+}
+
+function Shop({ mode, products, categories, origin, setOrigin, latestOnly, browseLatestCollection, browseFullCollection, banners, loading, error, cart, addToCart, updateQuantity, removeFromCart, heartProduct, searchQuery, setSearchQuery, showProducts, openRegionCatalog, openProductPage, focusedProductId, clearFocusedProduct, footerFeature }) {
   const [categoryId, setCategoryId] = useState('all')
   const [productPage, setProductPage] = useState(1)
   const [showAllProducts, setShowAllProducts] = useState(false)
   const [categorySidebarOpen, setCategorySidebarOpen] = useState(() => window.matchMedia('(min-width: 851px)').matches)
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const [heroIndex, setHeroIndex] = useState(0)
   const [heroPaused, setHeroPaused] = useState(hasConstrainedConnection)
   const [heroSource, updateHeroSource] = useState(() => localStorage.getItem('heroImageSource') === 'banner' ? 'banner' : 'product')
@@ -671,11 +807,24 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
     desktopDrawer.addEventListener('change', closeOverlayDrawer)
     return () => desktopDrawer.removeEventListener('change', closeOverlayDrawer)
   }, [])
+  useEffect(() => {
+    let resizeFrame = 0
+    const updateViewportWidth = () => {
+      window.cancelAnimationFrame(resizeFrame)
+      resizeFrame = window.requestAnimationFrame(() => setViewportWidth(window.innerWidth))
+    }
+    window.addEventListener('resize', updateViewportWidth, { passive: true })
+    return () => {
+      window.cancelAnimationFrame(resizeFrame)
+      window.removeEventListener('resize', updateViewportWidth)
+    }
+  }, [])
   const productSlides = useMemo(() => products
     .filter(isLatestProduct)
     .flatMap((product) => product.images.map((image, index) => ({
       id: `product-${product.id}-${index}`,
       image,
+      productId: product.id,
       label: product.name,
       alt: `${product.name}${product.images.length > 1 ? `, image ${index + 1}` : ''}`,
     }))), [products])
@@ -684,7 +833,7 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
     image: banner.blob_url,
     label: banner.title || banner.alt_text || 'Featured collection',
     alt: banner.alt_text || banner.title || 'Featured collection',
-    link: banner.link_url,
+    origin: String(banner.place_of_origin || '').trim(),
   })), [banners])
   const heroSlides = heroSource === 'banner' ? bannerSlides : productSlides
   const setHeroSource = (source) => {
@@ -702,6 +851,21 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
   }, [heroPaused, heroSlides.length])
   const heroSlide = heroSlides[heroIndex] || null
   const displayedHero = activeStory || heroSlide
+  const bannerOrigin = (slide) => {
+    if (!slide) return ''
+    const origins = [...new Set(products.map((product) => String(product.place || '').trim()).filter(Boolean))]
+    return origins.find((place) => place.toLowerCase() === String(slide.origin || '').toLowerCase()) || ''
+  }
+  const openCurrentHero = () => {
+    if (activeStory || !heroSlide) return
+    if (heroSource === 'product') {
+      openProductPage(heroSlide.productId)
+      return
+    }
+    const origin = bannerOrigin(heroSlide)
+    if (origin) openRegionCatalog(origin)
+    else showProducts()
+  }
   useEffect(() => {
     if (activeStory || heroSlides.length < 2 || hasConstrainedConnection() || window.matchMedia('(max-width: 850px)').matches) return undefined
     const preloadNext = () => {
@@ -724,9 +888,11 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
     ? collectionProducts
     : collectionProducts.filter((product) => String(product.category_id) === categoryId)
   const latestOrigins = useMemo(() => [...new Set(latestProducts.map((product) => String(product.place || '').trim()).filter(Boolean))].sort((first, second) => first.localeCompare(second)), [latestProducts])
-  const sidebarOrigins = useMemo(() => [...new Set(products.map((product) => String(product.place || '').trim()).filter(Boolean))].sort((first, second) => first.localeCompare(second)), [products])
-  const topOrigins = latestOnly ? latestOrigins : sidebarOrigins
-  const selectedOrigin = latestOnly && !latestOrigins.includes(origin) ? latestOrigins[0] || 'all' : origin
+  const sidebarOrigins = useMemo(() => [...new Set(products
+    .map((product) => String(product.place || '').trim())
+    .filter((place) => place && place.toLowerCase() !== 'diwali'))]
+    .sort((first, second) => first.localeCompare(second)), [products])
+  const selectedOrigin = String(origin).trim().toLowerCase() === 'diwali' || (latestOnly && origin !== 'all' && !latestOrigins.includes(origin)) ? 'all' : origin
   const topCategories = useMemo(() => {
     const normalizedOrigin = String(selectedOrigin).trim().toLowerCase()
     const availableCategoryIds = new Set((latestOnly ? latestProducts : products)
@@ -745,23 +911,31 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
     ? categoryFilteredProducts
     : categoryFilteredProducts.filter((product) => String(product.place || '').trim() === selectedOrigin)
   const normalizedSearch = searchQuery.trim().toLowerCase()
-  const visibleProducts = normalizedSearch
+  const focusedProduct = products.find((product) => String(product.id) === String(focusedProductId))
+  const visibleProducts = focusedProduct
+    ? [focusedProduct]
+    : normalizedSearch
     ? originFilteredProducts.filter((product) => `${product.name} ${product.craft} ${product.description || ''}`.toLowerCase().includes(normalizedSearch))
     : originFilteredProducts
-  const pageSize = 10
+  const gridColumnCount = viewportWidth <= 520
+    ? 1
+    : viewportWidth <= 1050 || (categorySidebarOpen && viewportWidth <= 1500)
+    ? 2
+    : 3
+  const pageSize = gridColumnCount === 3 ? 9 : gridColumnCount === 2 ? 8 : 6
   const pageCount = Math.max(1, Math.ceil(visibleProducts.length / pageSize))
   const currentPage = Math.min(productPage, pageCount)
   const pagedProducts = showAllProducts ? visibleProducts : visibleProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize)
   const selectCategory = (id, source) => {
     if (source === 'sidebar') browseFullCollection()
-    else if (latestOnly && !latestOrigins.includes(origin)) setOrigin(latestOrigins[0] || 'all')
+    else if (latestOnly && origin !== 'all' && !latestOrigins.includes(origin)) setOrigin('all')
     setCategoryId(id)
     setProductPage(1)
     setShowAllProducts(false)
   }
   const selectOrigin = (event, source) => {
     const nextOrigin = event.target.value
-    if (source === 'sidebar') browseFullCollection()
+    if (source === 'sidebar' && !(latestOnly && nextOrigin === 'all')) browseFullCollection()
     setOrigin(nextOrigin)
     setCategoryId('all')
     setProductPage(1)
@@ -770,11 +944,12 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
   const changeProductPage = (page) => {
     setProductPage(page)
     setShowAllProducts(false)
+    window.requestAnimationFrame(() => document.getElementById('products')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   }
   const selectProductScope = (scope) => {
     if (scope === 'latest') {
       browseLatestCollection()
-      setOrigin(latestOrigins[0] || 'all')
+      setOrigin('all')
     } else {
       browseFullCollection()
       setOrigin('all')
@@ -784,6 +959,7 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
     setShowAllProducts(false)
   }
   const viewAllProducts = () => {
+    setSearchQuery('')
     setOrigin(selectedOrigin)
     setCategoryId('all')
     setProductPage(1)
@@ -793,42 +969,46 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
   return <main>
     {mode === 'home' && !normalizedSearch && <><section className={`hero-section${activeStory ? ' story-active' : ''}${!activeStory && heroSource === 'product' ? ' hero-product-active' : ''}`}>
       <div className="hero-copy"><span className="eyebrow">{activeStory?.eyebrow || 'Handmade for the everyday'}</span><h1>{activeStory?.heading || <>Live with things<br/><em>that have a soul.</em></>}</h1><p>{activeStory?.text || 'Thoughtful objects, made by hand across India. Each piece carries the mark of its maker.'}</p><button className="primary" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div>
-      <div className="hero-art">{displayedHero ? <OptimizedImage className="hero-image" src={displayedHero.image} alt={activeStory ? `${activeStory.title}, Shilp & Soul craft story` : heroSlide?.alt || 'Handcrafted home decor'} priority width={1200} height={675} sizes="(max-width: 850px) 100vw, 52vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/> : <div className="hero-image" role="img" aria-label="Handcrafted home decor"/>}<div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={!activeStory && heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={!activeStory && heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div>{!activeStory && <div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div>}<div className="maker-note"><span>{activeStory ? `Our story · ${activeStory.number}` : heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{activeStory?.title || heroSlide?.label || (heroSource === 'banner' ? loading ? 'Loading featured banners…' : 'Featured banners unavailable' : 'Objects made with care')}</strong><button aria-label={heroSource === 'product' ? 'Open New arrivals' : 'Open Shop'} onClick={heroSource === 'product' ? showLatestProducts : showProducts}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
+      <div className="hero-art">{displayedHero ? activeStory ? <OptimizedImage className="hero-image" src={displayedHero.image} alt={`${activeStory.title}, Shilp & Soul craft story`} priority width={1200} height={675} sizes="(max-width: 850px) 100vw, 52vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/> : <button type="button" className="hero-click-target" onClick={openCurrentHero} aria-label={heroSource === 'product' ? `Open product page for ${heroSlide?.label}` : `Open ${bannerOrigin(heroSlide) || 'featured'} catalogue`}><OptimizedImage className="hero-image" src={displayedHero.image} alt={heroSlide?.alt || 'Handcrafted home decor'} priority width={1200} height={675} sizes="(max-width: 850px) 100vw, 52vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }}/></button> : <div className="hero-image" role="img" aria-label="Handcrafted home decor"/>}<div className="hero-source" role="group" aria-label="Choose hero image source"><button type="button" className={!activeStory && heroSource === 'banner' ? 'selected' : ''} onClick={() => setHeroSource('banner')}>Banner</button><button type="button" className={!activeStory && heroSource === 'product' ? 'selected' : ''} onClick={() => setHeroSource('product')}>Product</button></div>{!activeStory && <div className="hero-controls"><button type="button" onClick={() => setHeroPaused((paused) => !paused)} aria-label={heroPaused ? 'Start automatic hero images' : 'Pause automatic hero images'}><Icon name={heroPaused ? 'play' : 'pause'} size={16}/><span>{heroPaused ? 'Start' : 'Pause'}</span></button><button type="button" disabled={heroSlides.length < 2} onClick={() => setHeroIndex((current) => (current + 1) % heroSlides.length)} aria-label="Show next hero image"><span>Next</span><Icon name="chevron" size={16}/></button></div>}<div className="maker-note"><span>{activeStory ? `Our story · ${activeStory.number}` : heroSource === 'banner' ? 'Featured banner' : 'From the collection'}</span><strong>{activeStory?.title || heroSlide?.label || (heroSource === 'banner' ? loading ? 'Loading featured banners…' : 'Featured banners unavailable' : 'Objects made with care')}</strong><button aria-label={heroSource === 'product' ? `Open product page for ${heroSlide?.label}` : `Open ${bannerOrigin(heroSlide) || 'featured'} catalogue`} onClick={openCurrentHero}><Icon name="arrow" size={17}/></button></div><span className="shape shape-one"></span><span className="shape shape-two"></span></div>
     </section>
     <section className="story-strip" aria-label="The Shilp & Soul approach">{STORE_STORIES.map((story) => <button type="button" className={activeStory?.number === story.number ? 'selected' : ''} aria-pressed={activeStory?.number === story.number} onClick={() => { setActiveStory(story); setHeroPaused(true); window.scrollTo({ top: 0, behavior: 'smooth' }) }} key={story.number}><span>{story.number}</span> {story.title}</button>)}</section></>}
-    {mode === 'shop' && <section className={`collection${normalizedSearch ? ' search-results' : ''}${categorySidebarOpen ? ' category-sidebar-open' : ''}`} id="products">
-      <div className="section-head"><div><span className="eyebrow">{normalizedSearch ? 'Search results' : 'Curated for you'}</span><h2>{normalizedSearch ? `${visibleProducts.length} ${visibleProducts.length === 1 ? 'piece' : 'pieces'} found` : 'Objects of quiet beauty'}</h2></div>{!normalizedSearch && <button type="button" onClick={viewAllProducts}>View all pieces <Icon name="arrow" size={17}/></button>}</div>
-      <div className={`category-drawer${categorySidebarOpen ? ' open' : ''}`}>
-        <aside id="category-drawer-panel" aria-label="Product filters sidebar"><div className="category-drawer-head"><span>Filter by</span><strong>Product category</strong></div><label className="category-drawer-origin"><span>Place of Origin</span><select value={selectedOrigin} onChange={(event) => selectOrigin(event, 'sidebar')}><option value="all">All places</option>{sidebarOrigins.map((place) => <option value={place} key={place}>{place}</option>)}</select></label><div className="category-drawer-options"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => selectCategory('all', 'sidebar')}>All objects</button>{sidebarCategories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => selectCategory(String(category.id), 'sidebar')} key={category.id}>{category.name}</button>)}</div></aside>
+    {mode === 'shop' && <section className={`collection${normalizedSearch ? ' search-results' : ''}${categorySidebarOpen && !focusedProductId ? ' category-sidebar-open' : ''}${focusedProductId ? ' focused-product-page' : ''}`} id="products">
+      <div className="section-head"><div><span className="eyebrow">{focusedProductId ? 'Product details' : normalizedSearch ? 'Search results' : 'Curated for you'}</span><h2>{focusedProductId ? products.find((product) => String(product.id) === String(focusedProductId))?.name || 'Selected piece' : normalizedSearch ? `${visibleProducts.length} ${visibleProducts.length === 1 ? 'piece' : 'pieces'} found` : 'Objects of quiet beauty'}</h2></div>{focusedProductId && <button type="button" onClick={clearFocusedProduct}>Back to catalogue <Icon name="arrow" size={17}/></button>}</div>
+      {!focusedProductId && <div className={`category-drawer${categorySidebarOpen ? ' open' : ''}`}>
+        <aside id="category-drawer-panel" aria-label="Product filters sidebar"><div className="category-drawer-head"><span>Filter by</span><strong>Product category</strong></div><label className="category-drawer-origin"><span>Place of Origin</span><select value={selectedOrigin} onChange={(event) => selectOrigin(event, 'sidebar')}><option value="all">{latestOnly ? 'New Arrivals - All Places' : 'All Products - Every Place'}</option>{sidebarOrigins.map((place) => <option value={place} key={place}>{place}</option>)}</select></label><div className="category-drawer-options"><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => selectCategory('all', 'sidebar')}>All objects</button>{sidebarCategories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => selectCategory(String(category.id), 'sidebar')} key={category.id}>{category.name}</button>)}</div></aside>
         <button type="button" className="category-drawer-toggle" aria-controls="category-drawer-panel" aria-expanded={categorySidebarOpen} onClick={() => setCategorySidebarOpen((open) => !open)}><Icon name={categorySidebarOpen ? 'close' : 'menu'} size={17}/><span>Filters</span></button>
-      </div>
-      <div className="catalog-toolbar">
+      </div>}
+      {!focusedProductId && <div className="catalog-toolbar">
         <fieldset className="catalog-scope-filter"><legend>Products</legend><label><input type="radio" name="catalog-scope" checked={latestOnly} onChange={() => selectProductScope('latest')}/> Latest</label><label><input type="radio" name="catalog-scope" checked={!latestOnly} onChange={() => selectProductScope('all')}/> All Products</label></fieldset>
         <div className="catalog-filter-groups">
           <div className="filters" aria-label={`${latestOnly ? 'Latest' : 'All'} product categories`}><button className={categoryId === 'all' ? 'selected' : ''} onClick={() => selectCategory('all', 'top')}>All objects</button>{topCategories.map((category) => <button className={categoryId === String(category.id) ? 'selected' : ''} onClick={() => selectCategory(String(category.id), 'top')} key={category.id}>{category.name}</button>)}</div>
-          <label className="origin-filter"><span>Place of Origin</span><select value={selectedOrigin === 'all' ? 'all' : selectedOrigin} onChange={(event) => selectOrigin(event, 'top')} disabled={topOrigins.length === 0}>{!latestOnly && <option value="all">All places</option>}{latestOnly && topOrigins.length === 0 && <option value="all">No eligible places</option>}{topOrigins.map((place) => <option value={place} key={place}>{place}</option>)}</select></label>
         </div>
-      </div>
+        <div className="catalog-actions">
+          <label className="catalog-search"><Icon name="search" size={17}/><span className="sr-only">Search this collection</span><input type="search" value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setProductPage(1); setShowAllProducts(false) }} placeholder="Search products…"/></label>
+          <button type="button" className="catalog-view-all" onClick={viewAllProducts}>View all pieces <Icon name="arrow" size={17}/></button>
+        </div>
+      </div>}
       {loading && <div className="catalog-status" role="status">Loading the collection…</div>}
       {error && <div className="catalog-status error" role="alert">{error}</div>}
       {!loading && !error && visibleProducts.length === 0 && <div className="catalog-status">{normalizedSearch ? `No products match “${searchQuery.trim()}”.` : origin !== 'all' ? 'No pieces match the selected category and place of origin.' : 'No pieces are available in this category yet.'}</div>}
-      <div className="product-grid">{pagedProducts.map((product) => <ProductCard product={product} cartEntries={cart.filter((item) => item.id === product.id)} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} key={product.id} />)}</div>
-      {!showAllProducts && pageCount > 1 && <nav className="product-pagination product-pagination-bottom" aria-label="Product pages after products"><button type="button" disabled={currentPage === 1} onClick={() => changeProductPage(currentPage - 1)} aria-label="Previous product page">‹</button>{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" className={page === currentPage ? 'selected' : ''} aria-current={page === currentPage ? 'page' : undefined} onClick={() => changeProductPage(page)} key={page}>{page}</button>)}<button type="button" disabled={currentPage === pageCount} onClick={() => changeProductPage(currentPage + 1)} aria-label="Next product page">›</button></nav>}
+      <div className="product-grid">{pagedProducts.map((product) => <ProductCard product={product} cartEntries={cart.filter((item) => item.id === product.id)} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} heartProduct={heartProduct} autoOpen={Boolean(focusedProductId)} key={product.id} />)}</div>
+      {!focusedProductId && !showAllProducts && pageCount > 1 && <nav className="product-pagination product-pagination-bottom" aria-label="Product pages after products"><button type="button" disabled={currentPage === 1} onClick={() => changeProductPage(currentPage - 1)} aria-label="Previous product page">‹</button>{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" className={page === currentPage ? 'selected' : ''} aria-current={page === currentPage ? 'page' : undefined} onClick={() => changeProductPage(page)} key={page}>{page}</button>)}<button type="button" disabled={currentPage === pageCount} onClick={() => changeProductPage(currentPage + 1)} aria-label="Next product page">›</button></nav>}
     </section>}
     {mode === 'team' && <section className={`craft-callout${footerFeature ? ` showing-${footerFeature}` : ''}`}>{footerFeature === 'story' ? <><OptimizedImage className="our-story-image editorial-image" src="/story-artisan-made.png" alt="Indian craft traditions represented through handmade objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our story</span><h2>A small window into India’s<br/><em>living craft traditions.</em></h2><p>Shilp &amp; Soul shares India’s rich cultural imagination through objects made to be lived with. Our collection moves from Bandhej, Patola and Laharia clutches to gota, zari and thread-embroidered potli bags, each carrying the colour and rhythm of regional textile traditions. Hand-painted trays, peacock serving boxes and carved wall frames bring the warmth of Indian woodcraft to the table and home. Radha-Krishna décor and small ceremonial asans reflect the quiet place of devotion in everyday life, while expressive shirts and kurtis carry craft into the wardrobe. Every piece connects contemporary living with skills, symbols and stories shaped across generations.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'artisans' ? <><OptimizedImage className="artisans-image editorial-image" src="/story-made-to-last.png" alt="Artisan working on traditional carved wall decoration" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Our artisans</span><h2>Carved by hand.<br/><em>Alive with meaning.</em></h2><p>Behind our wall decorations are artisans who understand wood as both material and memory. Floral round frames are patiently carved to create depth through light and shadow; rectangular and triangular hanging sets are balanced, finished and assembled by hand. Radha-Krishna pieces bring devotional imagery into the home, where art and everyday worship have long lived together. The same eye for proportion and painted detail shapes our peacock serving boxes and wooden trays. Tool marks, subtle variations and the warmth of the grain are not imperfections—they are the maker’s presence, giving every Shilp &amp; Soul piece its individual character.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></> : footerFeature === 'journal' ? <><OptimizedImage className="journal-image editorial-image" src="/story-small-batch.png" alt="A curated collection of handmade Indian objects" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div className="journal-panel"><span className="eyebrow">The collection journal</span><h2>Objects, materials<br/>and their stories.</h2><div className="journal-product-list">{products.map((product) => { const description = product.product_description?.catalogue_description || product.description || product.craft || 'A thoughtfully selected piece shaped by Indian craft traditions.'; return <article key={product.id}><span>{product.sku || product.product_code || 'Shilp & Soul'}</span><h3>{product.name}</h3><p>{description}</p></article> })}{products.length === 0 && <p className="journal-empty">Our product stories are being prepared.</p>}<button className="text-link journal-explore" onClick={showProducts}>Explore our collection <Icon name="arrow" size={18}/></button></div></div></> : <><OptimizedImage className="makers-image editorial-image" src="/meet-our-makers.png" alt="Young makers arranging Indian handcrafted products" width={1200} height={675} sizes="(max-width: 850px) 100vw, 50vw"/><div><span className="eyebrow">Meet our makers</span><h2>Young perspectives.<br/><em>India at heart.</em></h2><p>Our makers bring a contemporary eye to the visual languages they grew up around. Their taste is shaped by the geometry of Patola, the movement of Laharia, the dotted rhythm of Bandhej and the glow of gota and zari. They pair embroidered potlis and clutches with carved wall frames, painted trays and devotional motifs—not as pieces frozen in the past, but as living expressions of Indian culture. Through colour, texture and thoughtful composition, they imagine how inherited craft can belong naturally in today’s wardrobe and home. Each choice is an invitation to discover heritage with curiosity, confidence and personal style.</p><button className="text-link" onClick={showProducts}>Explore the collection <Icon name="arrow" size={18}/></button></div></>}</section>}
   </main>
 }
 
-function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFromCart }) {
+function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFromCart, heartProduct, autoOpen = false }) {
   const images = product.images.length ? product.images : [FALLBACK_IMAGE]
   const colorRecords = Array.isArray(product.colors) ? product.colors : []
   const requiresColor = colorRecords.length > 0
   const colors = colorRecords.filter((color) => Number(color.quantity) > 0)
   const description = product.product_description || {}
   const [imageIndex, setImageIndex] = useState(0)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(autoOpen)
   const [expandedIndex, setExpandedIndex] = useState(0)
   const [selectedColorId, setSelectedColorId] = useState(() => colors.length ? String(colors[0].id) : '')
+  const [heartBusy, setHeartBusy] = useState(false)
   const selectedColor = colors.find((color) => String(color.id) === selectedColorId)
   const selectedCartEntry = requiresColor
     ? cartEntries.find((item) => String(item.productColorId) === selectedColorId)
@@ -857,6 +1037,15 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
     setExpandedIndex(imageIndex)
     setExpanded(true)
   }
+  const addTrendingHeart = async () => {
+    if (heartBusy || product.hearted) return
+    setHeartBusy(true)
+    try {
+      await heartProduct(product)
+    } finally {
+      setHeartBusy(false)
+    }
+  }
 
   return <article className="product-card">
     <div className="product-image">
@@ -864,7 +1053,7 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
         <OptimizedImage src={images[imageIndex]} alt={`${product.name}${images.length > 1 ? `, view ${imageIndex + 1} of ${images.length}` : ''}`} loading="lazy" width={720} height={720} sizes="(max-width: 520px) 100vw, (max-width: 850px) 50vw, 33vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} />
       </button>
       {images.length > 1 && <span className="image-count" aria-hidden="true">{imageIndex + 1}/{images.length}</span>}
-      <button className="wish" aria-label={`Save ${product.name}`}><Icon name="heart" size={18}/></button>
+      <button type="button" className={`wish${product.hearted ? ' selected' : ''}`} disabled={heartBusy || product.hearted} aria-label={`${product.hearted ? 'Heart counted for' : 'Add a trending heart to'} ${product.name}`} aria-pressed={Boolean(product.hearted)} onClick={addTrendingHeart}><Icon name="heart" size={18}/><span>{Number(product.trend_count || 0)}</span></button>
       <div className={`product-image-actions ${selectedCartEntry ? 'has-remove' : ''}`}>
         <button className="quick-add" disabled={!canAdd} onClick={() => addToCart(product, selectedColor)}>{requiresColor ? colors.length ? selectedColor ? 'Quick add' : 'Choose colour' : 'Colours out of stock' : product.stock > 0 ? 'Quick add' : 'Out of stock'} <Icon name="plus" size={16}/></button>
         {selectedCartEntry && <button className="reduce-in-bag" onClick={() => updateQuantity(cartLineKey(selectedCartEntry), -1)} aria-label={`Reduce ${product.name} in ${selectedCartEntry.color} by one`}>Reduce <Icon name="minus" size={14}/></button>}
@@ -1353,13 +1542,13 @@ function MarketingSignup() {
     }
     setSubmitting(true); setError('')
     try {
-      await marketingApi.subscribe(normalized)
+      await marketingApi.subscribe(normalized, crypto.randomUUID())
       setRegistered(true)
     } catch (subscribeError) {
-      setError(subscribeError.status === 400 ? 'Please enter a valid email address.' : subscribeError.status === 404 ? 'Marketing registration is not available yet.' : 'We could not register your email. Please try again.')
+      setError(subscribeError.status === 400 ? 'Please enter a valid email address.' : subscribeError.status === 409 ? 'This email is already registered for newsletter updates.' : subscribeError.status === 404 ? 'Marketing registration is not available yet.' : 'We could not register your email. Please try again.')
     } finally { setSubmitting(false) }
   }
-  return <div className="newsletter"><h4>Notes from the studio</h4><p>New collections, craft stories, and quiet inspiration.</p>{registered ? <div className="marketing-thanks" role="status"><Icon name="check" size={16}/><span>Thanks for registering for marketing messages.</span></div> : <form onSubmit={submit} noValidate><label><span className="sr-only">Email address</span><input type="email" inputMode="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); if (error) setError('') }} aria-invalid={Boolean(error)} aria-describedby={error ? 'marketing-email-error' : undefined} placeholder="Your email address"/><button disabled={submitting} aria-label="Subscribe to marketing messages">{submitting ? <span className="marketing-loading">…</span> : <Icon name="arrow"/>}</button></label>{error && <span className="marketing-error" id="marketing-email-error" role="alert">{error}</span>}</form>}</div>
+  return <div className="newsletter"><p>Register for regular newsletter updates.</p>{registered ? <div className="marketing-thanks" role="status"><Icon name="check" size={16}/><span>Registered. Please check your email for confirmation.</span></div> : <form onSubmit={submit} noValidate><label><span className="sr-only">Email address</span><input type="email" inputMode="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); if (error) setError('') }} aria-invalid={Boolean(error)} aria-describedby={error ? 'marketing-email-error' : undefined} placeholder="Your email address"/><button disabled={submitting} aria-label="Register for regular newsletter updates">{submitting ? <span className="marketing-loading">…</span> : <Icon name="arrow"/>}</button></label>{error && <span className="marketing-error" id="marketing-email-error" role="alert">{error}</span>}</form>}</div>
 }
 
 function ContactModal({ close, user }) {
@@ -1397,7 +1586,7 @@ function ContactModal({ close, user }) {
   return <><div className="contact-scrim" onClick={close}/><section className="contact-modal" role="dialog" aria-modal="true" aria-labelledby="contact-heading"><header><div><span className="eyebrow">Write to us</span><h2 id="contact-heading">Contact Shilp &amp; Soul</h2><p>Share a question, order concern or product enquiry with our support team.</p></div><button type="button" className="icon-button" onClick={close} aria-label="Close contact form"><Icon name="close"/></button></header><form onSubmit={submit}><label>Name<input maxLength="120" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name"/></label><label>Email address<input required maxLength="320" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com"/></label><label>Subject<select required value={subject} onChange={(event) => setSubject(event.target.value)}><option value="" disabled>Choose a subject</option><option value="Product">Product</option><option value="Service">Service</option><option value="Others">Others</option></select></label><label>Message</label><div className="message-toolbar" role="toolbar" aria-label="Message formatting"><button type="button" onClick={() => formatSelection('bold')} aria-label="Bold selected text"><b>B</b></button><button type="button" onClick={() => formatSelection('italic')} aria-label="Italicise selected text"><i>I</i></button><button type="button" onClick={() => formatSelection('list')} aria-label="Make selected lines a bulleted list">• List</button></div><textarea ref={messageRef} required minLength="10" maxLength="5000" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write your message…"/><input className="contact-honeypot" name="website" tabIndex="-1" autoComplete="off" aria-hidden="true"/><div className="contact-form-bottom"><span>{message.length} / 5000</span><button className="primary" disabled={submitting || !subject || !email.trim() || message.trim().length < 10}>{submitting?'Sending…':<>Send message <Icon name="arrow" size={17}/></>}</button></div>{status && <p className="contact-status" role="status">{status}</p>}</form></section></>
 }
 
-function ShopAssistant({ products, categories, user, onSignIn }) {
+function ShopAssistant({ products, categories, user, onSignIn, showLauncher = true }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState([greetingMessage])
   const [draft, setDraft] = useState('')
@@ -1407,6 +1596,12 @@ function ShopAssistant({ products, categories, user, onSignIn }) {
   const [details, setDetails] = useState('')
   const [saving, setSaving] = useState(false)
   const [showCustomerPrompt, setShowCustomerPrompt] = useState(false)
+
+  useEffect(() => {
+    const openAssistant = () => setOpen(true)
+    window.addEventListener('shop-assistant:open', openAssistant)
+    return () => window.removeEventListener('shop-assistant:open', openAssistant)
+  }, [])
 
   const answer = (question) => {
     const query = question.toLowerCase().trim()
@@ -1470,7 +1665,7 @@ function ShopAssistant({ products, categories, user, onSignIn }) {
       {requesting && <form className="requirement-form" onSubmit={submitRequirement}><label>Product requested<input required value={requestedProduct} onChange={(event) => setRequestedProduct(event.target.value)}/></label><label>Category<select required value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Choose a category</option>{categories.map((item) => <option value={item.name} key={item.id}>{item.name}</option>)}<option value="Other">Other</option></select></label><label>More details (optional)<textarea value={details} onChange={(event) => setDetails(event.target.value)} placeholder="Style, material, colour, budget…"/></label><div><button type="button" className="secondary" onClick={() => setRequesting(false)}>Not now</button><button className="primary" disabled={saving}>{saving ? 'Sharing…' : 'Share request'}</button></div></form>}
       <form className="assistant-input" onSubmit={send}><label className="sr-only" htmlFor="assistant-question">Ask a question</label><input id="assistant-question" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ask about a product…"/><button aria-label="Send question" disabled={!draft.trim()}><Icon name="send" size={17}/></button></form>
     </section>}
-    <button className="assistant-launcher" onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-label={open ? 'Close shopping assistant' : 'Open shopping assistant'}><Icon name={open ? 'close' : 'chat'}/><span>{open ? 'Close' : 'Can we help?'}</span></button>
+    {showLauncher && <button className="assistant-launcher" onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-label={open ? 'Close shopping assistant' : 'Open shopping assistant'}><Icon name={open ? 'close' : 'chat'}/><span>{open ? 'Close' : 'Can we help?'}</span></button>}
   </div>
 }
 

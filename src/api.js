@@ -85,6 +85,10 @@ export const catalogApi = {
   products: () => request(`/products?${listQuery()}`, { auth: false }),
   categories: () => request(`/categories?${listQuery()}`, { auth: false }),
   banners: () => request(`/storefront-highlights?${listQuery()}`, { auth: false, sameOrigin: true }),
+  heart: (productId, guestSessionId = '') => request(`/products/${encodeURIComponent(productId)}/heart`, {
+    method: 'POST',
+    headers: guestSessionId ? { 'X-Guest-Session-Id': guestSessionId } : undefined,
+  }),
 }
 
 export const cartApi = {
@@ -137,7 +141,7 @@ export const marketRequirementApi = {
 }
 
 export const marketingApi = {
-  subscribe: (email) => request('/marketing', { auth: false, method: 'POST', body: JSON.stringify({ email }) }),
+  subscribe: (email, requestId) => request('/marketing', { auth: false, method: 'POST', body: JSON.stringify({ email, request_id: requestId }) }),
 }
 
 export const contactApi = {
