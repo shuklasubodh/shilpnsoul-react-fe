@@ -236,6 +236,13 @@ function App() {
     let active = true
     authApi.session().then((session) => {
       if (!active) return
+      if (!session.user) {
+        startGuestSession()
+        setUser(null)
+        setSessionIdentity(getGuestSessionId())
+        setCheckoutMode('guest')
+        return
+      }
       saveSession(session)
       setUser(session.user)
       setSessionIdentity(session.user.id)

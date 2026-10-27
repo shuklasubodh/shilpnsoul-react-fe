@@ -13,7 +13,16 @@ const safeErrorMessage = (status, path, payload) => {
   if (status === 410) return 'This link is no longer available. Request a new invitation.'
   if (status === 409 && /contact-ownership|notification-verifications/.test(path)) return 'Customer details are already present. Reset the unverified values or sign in with the customer credentials.'
   if (status === 409) return 'This request conflicts with existing information. Refresh and try again.'
-  if (status === 429) return 'Too many attempts. Please wait before trying again.'
+  if (status === 429) {
+    const retrySeconds = Number(payload?.retry_after_seconds || payload?.retry_after || 0)
+    if (retrySeconds > 0) {
+      const minutes = Math.ceil(retrySeconds / 60)
+      return retrySeconds < 60
+        ? `Please wait ${retrySeconds} seconds before trying again.`
+        : `Verification limit reached. Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`
+    }
+    return serverMessage || 'Too many attempts. Please wait before trying again.'
+  }
   if (/EXPIRED/.test(serverCode) || /\bexpired\b/i.test(serverMessage)) return 'The verification code has expired.'
   if (/INVALID.*(?:CODE|TOKEN)|(?:CODE|TOKEN).*INVALID/.test(serverCode) || (/invalid|incorrect/i.test(serverMessage) && /code|token/i.test(serverMessage))) return 'The verification code is incorrect.'
   if (status === 400 || status === 422) return 'Check the information supplied and try again.'

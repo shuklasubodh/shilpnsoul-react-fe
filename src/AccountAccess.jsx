@@ -17,13 +17,27 @@ const channelName = (channel) => channel === 'WHATSAPP' ? 'WhatsApp' : channel =
 function VerificationRows({ channels, destinations, purpose, invitationToken = '', tokens, setTokens, disabled, setDisabled, setMessage, setError }) {
   const [ids, setIds] = useState({})
   const [codes, setCodes] = useState({})
+  const [cooldowns, setCooldowns] = useState({})
+  useEffect(() => {
+    const timer = window.setInterval(() => setCooldowns((current) => Object.fromEntries(
+      Object.entries(current).map(([channel, seconds]) => [channel, Math.max(0, seconds - 1)]),
+    )), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
   const requestCode = async (channel) => {
     setDisabled(true); setError(''); setMessage('')
     try {
       const result = await authApi.requestVerification(destinations[channel], purpose, channel, invitationToken)
       setIds((current) => ({ ...current, [channel]: result.verification_id }))
+      setCooldowns((current) => ({ ...current, [channel]: Number(result.resend_after_seconds) || 60 }))
       setMessage(`A six-digit code was sent by ${channelName(channel)}.`)
-    } catch (error) { setError(error.message) }
+    } catch (error) {
+      if (error.status === 429) {
+        const retrySeconds = Number(error.details?.retry_after_seconds || error.details?.retry_after || error.retryAfter || 60)
+        setCooldowns((current) => ({ ...current, [channel]: Math.max(1, retrySeconds) }))
+      }
+      setError(error.message)
+    }
     finally { setDisabled(false) }
   }
   const confirmCode = async (channel) => {
@@ -37,7 +51,7 @@ function VerificationRows({ channels, destinations, purpose, invitationToken = '
   }
   return <div className="registration-verification-list">
     {channels.map((channel) => <div className="registration-verification" key={channel}>
-      <button className="secondary" type="button" disabled={disabled || tokens[channel]} onClick={() => requestCode(channel)}>{tokens[channel] ? `${channelName(channel)} verified` : ids[channel] ? 'Resend code' : `Send ${channelName(channel)} code`}</button>
+      <button className="secondary" type="button" disabled={disabled || tokens[channel] || cooldowns[channel] > 0} onClick={() => requestCode(channel)}>{tokens[channel] ? `${channelName(channel)} verified` : cooldowns[channel] > 0 ? `Try again in ${cooldowns[channel]}s` : ids[channel] ? 'Resend code' : `Send ${channelName(channel)} code`}</button>
       {ids[channel] && !tokens[channel] && <>
         <input aria-label={`${channel} six-digit verification code`} inputMode="numeric" maxLength="6" value={codes[channel] || ''} onChange={(event) => setCodes((current) => ({ ...current, [channel]: event.target.value.replace(/\D/g, '').slice(0, 6) }))}/>
         <button className="secondary" type="button" disabled={disabled || (codes[channel] || '').length !== 6} onClick={() => confirmCode(channel)}>Verify</button>
