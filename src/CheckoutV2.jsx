@@ -42,7 +42,7 @@ function Summary({ cart, total }) {
   return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map((item) => <div className="summary-item summary-item--compact" key={`${item.id}:${item.productColorId ?? 'none'}`}><p><strong>{item.name}</strong><span>Quantity {item.quantity}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<div className="summary-lines"><p><span>Delivery</span><b>{delivery ? `S$${delivery.toFixed(2)}` : 'Complimentary'}</b></p></div><div className="summary-total"><span>Total</span><strong>S${(total + delivery).toFixed(2)}</strong></div></aside>
 }
 
-export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, confirmed, confirmationReference, go, onSignIn }) {
+export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedIn, onConfirm, onInventoryChanged, confirmed, confirmationReference, go, onSignIn }) {
   const [email, setEmail] = useState(isLoggedIn ? user?.email || '' : '')
   const [phone, setPhone] = useState(isLoggedIn ? user?.phone || '' : '')
   const [whatsapp, setWhatsapp] = useState(isLoggedIn ? user?.whatsapp_number || user?.phone || '' : '')
@@ -229,11 +229,14 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
         }
       }
       if (!pending?.id) {
+        const requestId = pending?.requestId || crypto.randomUUID()
+        pending = { ...pending, requestId }
+        sessionStorage.setItem(storageKey, JSON.stringify(pending))
         const customerContactUpdates = isLoggedIn ? selectedChannels.filter((channel) => verificationTokens[channel] && !accountVerified(channel)) : []
-        const details = { shipping_name: data.get('name'), shipping_phone: toE164(phone), shipping_address: data.get('shippingAddress'), contact_email: destinations.EMAIL, contact_phone: destinations.SMS || '', contact_whatsapp: destinations.WHATSAPP || '', payment_method: 'STRIPE', notification_channels: ['EMAIL', ...extraChannels], verification_channels: selectedChannels, notification_verification_tokens: verificationTokens, verification_tokens: verificationTokens, customer_contact_updates: customerContactUpdates, verification_scope: isLoggedIn ? 'CUSTOMER' : 'ORDER_ONLY', ...(checkoutId ? { checkout_id: checkoutId } : {}) }
+        const details = { shipping_name: data.get('name'), shipping_phone: toE164(phone), shipping_address: data.get('shippingAddress'), contact_email: destinations.EMAIL, contact_phone: destinations.SMS || '', contact_whatsapp: destinations.WHATSAPP || '', payment_method: 'STRIPE', checkout_request_id: requestId, notification_channels: ['EMAIL', ...extraChannels], verification_channels: selectedChannels, notification_verification_tokens: verificationTokens, verification_tokens: verificationTokens, customer_contact_updates: customerContactUpdates, verification_scope: isLoggedIn ? 'CUSTOMER' : 'ORDER_ONLY', ...(checkoutId ? { checkout_id: checkoutId } : {}) }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
         const order = isLoggedIn ? await orderApi.checkout({ ...details, items }) : await orderApi.guestCheckout(details, items)
-        pending = { id: order.id, csrfToken: order.order_access_csrf_token || '' }
+        pending = { ...pending, id: order.id, csrfToken: order.order_access_csrf_token || '' }
         sessionStorage.setItem(storageKey, JSON.stringify(pending))
       }
       const result = await paymentApi.createStripeCheckout(pending.id, pending.csrfToken)
@@ -242,7 +245,11 @@ export default function CheckoutV2({ cart, total, mode, setMode, user, isLoggedI
       setVerificationCodes({})
       setVerificationTokens({})
       window.location.assign(validatedStripeCheckoutUrl(result.checkout_url))
-    } catch (failure) { setError(failure.message || 'Checkout could not be started.'); setBusy(false) }
+    } catch (failure) {
+      if (failure.code === 'INVENTORY_CHANGED') await onInventoryChanged?.().catch(() => {})
+      setError(failure.message || 'Checkout could not be started.')
+      setBusy(false)
+    }
   }
 
   useEffect(() => {

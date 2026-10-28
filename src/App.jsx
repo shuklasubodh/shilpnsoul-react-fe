@@ -186,6 +186,20 @@ const productImages = (product) => {
 }
 
 const isLatestProduct = (product) => ['T', 'TRUE', '1', 'Y'].includes(String(product.latest || '').trim().toUpperCase())
+const catalogProduct = (product, categoryNames, previous) => {
+  const images = productImages(product)
+  return {
+    ...previous,
+    ...product,
+    images,
+    price: Number(product.price),
+    stock: Number(product.stock_quantity),
+    trend_count: Number(product.trend_count || 0),
+    hearted: previous?.hearted || false,
+    image: images[0] || FALLBACK_IMAGE,
+    craft: categoryNames.get(String(product.category_id)) || previous?.craft || 'Uncategorised',
+  }
+}
 
 const Icon = ({ name, size = 20 }) => {
   const paths = {
@@ -237,6 +251,19 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [footerFeature, setFooterFeature] = useState(null)
   const syncingGuestCart = useRef(false)
+
+  const refreshInventory = useCallback(async () => {
+    const productRecords = await catalogApi.products()
+    const categoryNames = new Map(categories.map((category) => [String(category.id), category.name]))
+    setProducts((current) => {
+      const previous = new Map(current.map((product) => [String(product.id), product]))
+      return productRecords
+        .filter((product) => product.is_active !== false)
+        .map((product) => catalogProduct(product, categoryNames, previous.get(String(product.id))))
+    })
+    setCatalogError('')
+    return productRecords
+  }, [categories])
 
   useEffect(() => removeLegacyUserCarts(), [])
 
@@ -333,19 +360,7 @@ function App() {
           .sort((first, second) => Number(first.sort_order) - Number(second.sort_order) || Number(first.id) - Number(second.id)))
         setProducts(productRecords
           .filter((product) => product.is_active !== false)
-          .map((product) => {
-            const images = productImages(product)
-            return {
-              ...product,
-              images,
-              price: Number(product.price),
-              stock: Number(product.stock_quantity),
-              trend_count: Number(product.trend_count || 0),
-              hearted: false,
-              image: images[0] || FALLBACK_IMAGE,
-              craft: categoryNames.get(String(product.category_id)) || 'Uncategorised',
-            }
-          }))
+          .map((product) => catalogProduct(product, categoryNames)))
       } catch (error) {
         if (active) setCatalogError(error.message || 'Unable to load the collection')
       } finally {
@@ -355,6 +370,18 @@ function App() {
     loadCatalog()
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    const refreshVisibleCatalog = () => {
+      if (document.visibilityState === 'visible') refreshInventory().catch(() => {})
+    }
+    window.addEventListener('focus', refreshVisibleCatalog)
+    document.addEventListener('visibilitychange', refreshVisibleCatalog)
+    return () => {
+      window.removeEventListener('focus', refreshVisibleCatalog)
+      document.removeEventListener('visibilitychange', refreshVisibleCatalog)
+    }
+  }, [refreshInventory])
 
   useEffect(() => {
     if (user) return
@@ -521,6 +548,7 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const showProducts = () => {
+    void refreshInventory().catch(() => {})
     setFocusedProductId(null)
     setCatalogNav('shop')
     setLatestOnly(true)
@@ -532,6 +560,7 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const showShopProducts = () => {
+    void refreshInventory().catch(() => {})
     setFocusedProductId(null)
     setCatalogNav('shop')
     setLatestOnly(false)
@@ -545,6 +574,7 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const showLatestProducts = () => {
+    void refreshInventory().catch(() => {})
     setFocusedProductId(null)
     setCatalogNav('latest')
     setLatestOnly(true)
@@ -695,7 +725,8 @@ function App() {
       setSessionIdentity(getGuestSessionId())
     }
     if (user?.id) cartApi.load().then(cartApi.clear).catch(() => setToast('Order completed, but the bag could not be cleared.'))
-  }, [user])
+    void refreshInventory().catch(() => {})
+  }, [refreshInventory, user])
 
   return (
     <div className="app-shell">
@@ -723,7 +754,7 @@ function App() {
 
       {(view === 'home' || view === 'shop' || view === 'team') && <Shop key={`${view}-${shopResetKey}`} mode={view} products={products} categories={categories} origin={shopOrigin} setOrigin={setShopOrigin} latestOnly={latestOnly} browseLatestCollection={showLatestProducts} browseFullCollection={() => setLatestOnly(false)} banners={banners} loading={catalogLoading} error={catalogError} cart={cart} addToCart={addToCart} updateQuantity={updateQuantity} removeFromCart={removeFromCart} heartProduct={heartProduct} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showProducts={showProducts} openRegionCatalog={openRegionCatalog} openProductPage={openProductPage} focusedProductId={focusedProductId} clearFocusedProduct={() => setFocusedProductId(null)} footerFeature={footerFeature} openFooterFeature={setFooterFeature} closeFooterFeature={() => setFooterFeature(null)} />}
       {LEGAL_PATH_BY_VIEW[view] && <LegalPage view={view} back={() => go('home')} contact={() => setContactOpen(true)} />}
-      {view === 'checkout' && <CheckoutV2 key={sessionIdentity} cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} confirmed={confirmed} confirmationReference={confirmationReference} go={go} onSignIn={() => setLoginOpen(true)} />}
+      {view === 'checkout' && <CheckoutV2 key={sessionIdentity} cart={cart} total={total} mode={checkoutMode} setMode={setCheckoutMode} user={user} isLoggedIn={isLoggedIn} onConfirm={completeOrder} onInventoryChanged={refreshInventory} confirmed={confirmed} confirmationReference={confirmationReference} go={go} onSignIn={() => setLoginOpen(true)} />}
       {view === 'track' && !isLoggedIn && <TrackOrder />}
       {view === 'track' && isLoggedIn && <Orders products={products} />}
       {view === 'orders' && <Orders products={products} />}
@@ -1244,15 +1275,19 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
         }
       }
       if (!pending?.id) {
+        const requestId = pending?.requestId || crypto.randomUUID()
+        pending = { ...pending, requestId }
+        sessionStorage.setItem(pendingKey, JSON.stringify(pending))
         const details = {
           shipping_name: data.get('name'), shipping_phone: submittedPhoneE164, shipping_address: data.get('shippingAddress'),
           contact_email: submittedEmail, contact_phone: submittedPhoneE164, contact_whatsapp: WHATSAPP_ENABLED ? normalizedCheckoutWhatsapp : '', payment_method: 'STRIPE',
+          checkout_request_id: requestId,
           notification_channel: notificationChannel, notification_destination: notificationDestination, notification_verification_token: verificationToken,
           verification_tokens: verificationToken ? { [notificationChannel]: verificationToken } : {}, ...(checkoutId ? { checkout_id: checkoutId } : {}),
         }
         const items = cart.map(({ id, productColorId, quantity }) => ({ product_id: id, product_color_id: productColorId, quantity }))
         const order = isLoggedIn ? await orderApi.checkout({ ...details, items }) : await orderApi.guestCheckout(details, items)
-        pending = { id: order.id, csrfToken: order.order_access_csrf_token || '' }
+        pending = { ...pending, id: order.id, csrfToken: order.order_access_csrf_token || '' }
         sessionStorage.setItem(pendingKey, JSON.stringify(pending))
       }
       const result = await paymentApi.createStripeCheckout(pending.id, pending.csrfToken)

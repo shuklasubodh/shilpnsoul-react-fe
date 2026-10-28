@@ -11,6 +11,7 @@ const safeErrorMessage = (status, path, payload) => {
   if (status === 403) return 'You do not have permission to perform this action.'
   if (status === 404) return 'The requested information is no longer available.'
   if (status === 410) return 'This link is no longer available. Request a new invitation.'
+  if (status === 409 && serverCode === 'INVENTORY_CHANGED') return serverMessage || 'Product availability changed. Review your bag and try again.'
   if (status === 409 && /contact-ownership|notification-verifications/.test(path)) return 'Customer details are already present. Reset the unverified values or sign in with the customer credentials.'
   if (status === 409) return 'This request conflicts with existing information. Refresh and try again.'
   if (status === 429) {
