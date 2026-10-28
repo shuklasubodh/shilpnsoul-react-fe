@@ -149,13 +149,21 @@ const savedGuestCart = () => {
 
 const cartRecords = (payload) => Array.isArray(payload) ? payload : payload?.items || payload?.cart_items || []
 const cartLineKey = (item) => item.lineKey || `${item.id}:${item.productColorId ?? 'none'}`
+const productVariantType = (product) => {
+  const configured = String(product?.variant_type || '').trim().toUpperCase()
+  if (['COLOR', 'SIZE', 'BOTH', 'NONE'].includes(configured)) return configured
+  const variants = Array.isArray(product?.colors) ? product.colors : []
+  if (!variants.length) return 'NONE'
+  return variants.some((variant) => String(variant.size || '').trim()) ? 'BOTH' : 'COLOR'
+}
+const variantSummary = (item) => [item?.color, item?.size].filter(Boolean).join(' / ')
 const hydrateCart = (payload, products) => cartRecords(payload).flatMap((record) => {
   const productId = record.product_id ?? record.productId ?? record.product?.id ?? record.id
   const product = products.find((candidate) => String(candidate.id) === String(productId))
   if (!product) return []
   const productColorId = record.product_color_id ?? record.productColorId ?? null
   const selectedColor = product.colors?.find((color) => String(color.id) === String(productColorId))
-  return [{ ...product, quantity: Number(record.quantity) || 1, cartItemId: record.id, productColorId, color: record.color || selectedColor?.color || '', stock: Number(record.available_quantity ?? selectedColor?.quantity ?? product.stock), lineKey: `${product.id}:${productColorId ?? 'none'}` }]
+  return [{ ...product, quantity: Number(record.quantity) || 1, cartItemId: record.id, productColorId, color: record.color || selectedColor?.color || '', size: record.size || selectedColor?.size || '', stock: Number(record.available_quantity ?? selectedColor?.quantity ?? product.stock), lineKey: `${product.id}:${productColorId ?? 'none'}` }]
 })
 
 const removeLegacyUserCarts = () => {
@@ -426,14 +434,16 @@ function App() {
 
   const refreshUserCart = async (cartId) => setCart(hydrateCart(cartId ? await cartApi.get(cartId) : await cartApi.load(), products))
 
-  const addToCart = async (product, selectedColor) => {
-    const requiresColor = Array.isArray(product.colors) && product.colors.length > 0
-    if (requiresColor && !selectedColor) {
-      setToast(`Choose a colour for ${product.name}`)
+  const addToCart = async (product, selectedVariant) => {
+    const variantType = productVariantType(product)
+    const requiresVariant = variantType !== 'NONE'
+    if (requiresVariant && !selectedVariant) {
+      const requiredOption = variantType === 'BOTH' ? 'colour and size' : variantType === 'SIZE' ? 'size' : 'colour'
+      setToast(`Choose a ${requiredOption} for ${product.name}`)
       return
     }
-    const productColorId = selectedColor?.id ?? null
-    const availableStock = Number(selectedColor?.quantity ?? product.stock)
+    const productColorId = selectedVariant?.id ?? null
+    const availableStock = Number(selectedVariant?.quantity ?? product.stock)
     if (availableStock < 1) {
       setToast(`${product.name} is out of stock`)
       return
@@ -460,7 +470,7 @@ function App() {
     setGuestSessionActive(true)
     setCart((current) => current.some((item) => cartLineKey(item) === lineKey)
       ? current.map((item) => cartLineKey(item) === lineKey ? { ...item, quantity: Math.min(item.quantity + 1, item.stock) } : item)
-      : [...current, { ...product, quantity: 1, productColorId, color: selectedColor?.color || '', stock: availableStock, lineKey }])
+      : [...current, { ...product, quantity: 1, productColorId, color: selectedVariant?.color || '', size: selectedVariant?.size || '', stock: availableStock, lineKey }])
     }
     setToast(`${product.name} added to your bag`)
     window.setTimeout(() => setToast(''), 2200)
@@ -1011,22 +1021,35 @@ function Shop({ mode, products, categories, origin, setOrigin, latestOnly, brows
 
 function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFromCart, heartProduct, autoOpen = false }) {
   const images = product.images.length ? product.images : [FALLBACK_IMAGE]
-  const colorRecords = Array.isArray(product.colors) ? product.colors : []
-  const requiresColor = colorRecords.length > 0
-  const colors = colorRecords.filter((color) => Number(color.quantity) > 0)
+  const variantType = productVariantType(product)
+  const usesColor = variantType === 'COLOR' || variantType === 'BOTH'
+  const usesSize = variantType === 'SIZE' || variantType === 'BOTH'
+  const requiresVariant = usesColor || usesSize
+  const variants = (Array.isArray(product.colors) ? product.colors : []).filter((variant) => Number(variant.quantity) > 0)
+  const colorChoices = [...new Set(variants.map((variant) => String(variant.color || '').trim()).filter(Boolean))]
   const description = product.product_description || {}
   const [imageIndex, setImageIndex] = useState(0)
   const [expanded, setExpanded] = useState(autoOpen)
   const [expandedIndex, setExpandedIndex] = useState(0)
-  const [selectedColorId, setSelectedColorId] = useState(() => colors.length ? String(colors[0].id) : '')
+  const [selectedColor, setSelectedColor] = useState(() => usesColor ? String(variants[0]?.color || '') : '')
+  const sizeChoices = [...new Set(variants
+    .filter((variant) => !usesColor || variantType !== 'BOTH' || String(variant.color || '') === selectedColor)
+    .map((variant) => String(variant.size || '').trim()).filter(Boolean))]
+  const [selectedSize, setSelectedSize] = useState(() => usesSize ? String(variants[0]?.size || '') : '')
   const [heartBusy, setHeartBusy] = useState(false)
-  const selectedColor = colors.find((color) => String(color.id) === selectedColorId)
-  const selectedCartEntry = requiresColor
-    ? cartEntries.find((item) => String(item.productColorId) === selectedColorId)
+  const selectedVariant = variants.find((variant) => (!usesColor || String(variant.color || '') === selectedColor) && (!usesSize || String(variant.size || '') === selectedSize))
+  const selectedCartEntry = requiresVariant
+    ? cartEntries.find((item) => String(item.productColorId) === String(selectedVariant?.id || ''))
     : cartEntries.find((item) => item.productColorId == null)
-  const availableStock = Number(selectedColor?.quantity ?? product.stock)
-  const canAdd = availableStock > 0 && (!requiresColor || Boolean(selectedColor))
+  const availableStock = Number(selectedVariant?.quantity ?? product.stock)
+  const canAdd = availableStock > 0 && (!requiresVariant || Boolean(selectedVariant))
   const cartQuantity = cartEntries.reduce((sum, item) => sum + item.quantity, 0)
+  const chooseColor = (color) => {
+    setSelectedColor(color)
+    if (variantType !== 'BOTH') return
+    const availableSizes = variants.filter((variant) => variant.color === color).map((variant) => String(variant.size || ''))
+    if (!availableSizes.includes(selectedSize)) setSelectedSize(availableSizes[0] || '')
+  }
 
   useEffect(() => {
     if (!expanded) return undefined
@@ -1066,23 +1089,24 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
       {images.length > 1 && <span className="image-count" aria-hidden="true">{imageIndex + 1}/{images.length}</span>}
       <button type="button" className={`wish${product.hearted ? ' selected' : ''}`} disabled={heartBusy || product.hearted} aria-label={`${product.hearted ? 'Heart counted for' : 'Add a trending heart to'} ${product.name}`} aria-pressed={Boolean(product.hearted)} onClick={addTrendingHeart}><Icon name="heart" size={18}/><span>{Number(product.trend_count || 0)}</span></button>
       <div className={`product-image-actions ${selectedCartEntry ? 'has-remove' : ''}`}>
-        <button className="quick-add" disabled={!canAdd} onClick={() => addToCart(product, selectedColor)}>{requiresColor ? colors.length ? selectedColor ? 'Quick add' : 'Choose colour' : 'Colours out of stock' : product.stock > 0 ? 'Quick add' : 'Out of stock'} <Icon name="plus" size={16}/></button>
-        {selectedCartEntry && <button className="reduce-in-bag" onClick={() => updateQuantity(cartLineKey(selectedCartEntry), -1)} aria-label={`Reduce ${product.name} in ${selectedCartEntry.color} by one`}>Reduce <Icon name="minus" size={14}/></button>}
-        {selectedCartEntry && <button className="remove-from-bag" onClick={() => removeFromCart(cartLineKey(selectedCartEntry))} aria-label={`Remove ${product.name} in ${selectedCartEntry.color} from bag`}>Remove <Icon name="close" size={14}/></button>}
+        <button className="quick-add" disabled={!canAdd} onClick={() => addToCart(product, selectedVariant)}>{requiresVariant ? variants.length ? selectedVariant ? 'Quick add' : 'Choose options' : 'Options out of stock' : product.stock > 0 ? 'Quick add' : 'Out of stock'} <Icon name="plus" size={16}/></button>
+        {selectedCartEntry && <button className="reduce-in-bag" onClick={() => updateQuantity(cartLineKey(selectedCartEntry), -1)} aria-label={`Reduce ${product.name}${variantSummary(selectedCartEntry) ? ` in ${variantSummary(selectedCartEntry)}` : ''} by one`}>Reduce <Icon name="minus" size={14}/></button>}
+        {selectedCartEntry && <button className="remove-from-bag" onClick={() => removeFromCart(cartLineKey(selectedCartEntry))} aria-label={`Remove ${product.name}${variantSummary(selectedCartEntry) ? ` in ${variantSummary(selectedCartEntry)}` : ''} from bag`}>Remove <Icon name="close" size={14}/></button>}
       </div>
     </div>
     {images.length > 1 && <div className="product-image-tiles" aria-label={`Choose an image for ${product.name}`}>
       {images.slice(0, 5).map((url, index) => <button type="button" className={imageIndex === index ? 'selected' : ''} aria-label={`Show image ${index + 1} of ${images.length} for ${product.name}`} aria-pressed={imageIndex === index} onClick={() => setImageIndex(index)} key={`${url}-card-tile`}><OptimizedImage src={url} alt="" loading="lazy" width={72} height={72} sizes="72px" /></button>)}
     </div>}
     <div className="product-meta"><div><h3>{product.name}</h3><p>{product.craft}</p><p className={`stock-availability ${product.stock < 1 ? 'out-of-stock' : ''}`}><span>{product.stock < 1 ? 'Out of stock' : `${product.stock} available`}</span>{cartQuantity > 0 && <b>{cartQuantity} in bag</b>}</p></div><strong>S${product.price.toFixed(2)}</strong></div>
-    {requiresColor ? <label className="product-card-color">Colour<select aria-label={`Choose colour for ${product.name}`} value={selectedColorId} onChange={(event) => setSelectedColorId(event.target.value)} disabled={!colors.length}>{colors.length ? colors.map((color) => <option value={color.id} key={color.id}>{color.color} ({color.quantity} available)</option>) : <option value="">Colours out of stock</option>}</select></label> : null}
+    {usesColor && <label className="product-card-color">Colour<select aria-label={`Choose colour for ${product.name}`} value={selectedColor} onChange={(event) => chooseColor(event.target.value)} disabled={!colorChoices.length}>{colorChoices.length ? colorChoices.map((color) => <option value={color} key={color}>{color} ({variants.filter((variant) => variant.color === color).reduce((sum, variant) => sum + Number(variant.quantity), 0)} available)</option>) : <option value="">Colours out of stock</option>}</select></label>}
+    {usesSize && <label className="product-card-color">Size<select aria-label={`Choose size for ${product.name}`} value={selectedSize} onChange={(event) => setSelectedSize(event.target.value)} disabled={!sizeChoices.length}>{sizeChoices.length ? sizeChoices.map((size) => { const variant = variants.find((item) => item.size === size && (!usesColor || variantType !== 'BOTH' || item.color === selectedColor)); return <option value={size} key={size}>{size} ({variant?.quantity || 0} available)</option> }) : <option value="">Sizes out of stock</option>}</select></label>}
     {expanded && <div className="image-lightbox" role="dialog" aria-modal="true" aria-label={`${product.name} image gallery`} onClick={() => setExpanded(false)}>
       <div className="lightbox-panel product-gallery-panel" onClick={(event) => event.stopPropagation()}>
         <button className="lightbox-close icon-button" onClick={() => setExpanded(false)} aria-label="Close image gallery"><Icon name="close" /></button>
         <div className="gallery-visual"><button className="lightbox-main" onClick={() => setExpandedIndex((expandedIndex + 1) % images.length)} aria-label={images.length > 1 ? 'Show next image' : product.name}><OptimizedImage src={images[expandedIndex]} alt={`${product.name}, enlarged view ${expandedIndex + 1} of ${images.length}`} priority width={1200} height={1200} sizes="(max-width: 850px) 100vw, 65vw" onError={(event) => { event.currentTarget.src = FALLBACK_IMAGE }} /></button>
           {images.length > 1 && <><button className="gallery-arrow previous" onClick={() => setExpandedIndex((expandedIndex - 1 + images.length) % images.length)} aria-label="Previous image"><Icon name="chevron" /></button><button className="gallery-arrow next" onClick={() => setExpandedIndex((expandedIndex + 1) % images.length)} aria-label="Next image"><Icon name="chevron" /></button></>}
           <div className="gallery-thumbnails" aria-label="Choose product image">{images.map((url, index) => <button className={expandedIndex === index ? 'selected' : ''} onClick={() => setExpandedIndex(index)} aria-label={`View image ${index + 1}`} key={`${url}-${index}`}><OptimizedImage src={url} alt="" loading="lazy" width={120} height={120} sizes="120px" /></button>)}</div><span className="lightbox-count">{expandedIndex + 1} / {images.length}</span></div>
-        <aside className="gallery-product-details">{description.festive_note && <blockquote className="festive-note"><b>Festive note</b>{description.festive_note}</blockquote>}<span className="eyebrow">Product details</span><h2>{description.title || product.name}</h2><p>{description.catalogue_description || product.description}</p>{description.dimensions && <div><b>Dimensions</b><span>{description.dimensions}</span></div>}{description.color_description && <div><b>Colour</b><span>{description.color_description}</span></div>}{description.pattern_craft && <div><b>Pattern / craft</b><span>{description.pattern_craft}</span></div>}{requiresColor ? <label>Available colour<select value={selectedColorId} onChange={(event) => setSelectedColorId(event.target.value)}><option value="">Select colour</option>{colors.map((color) => <option value={color.id} key={color.id}>{color.color} ({color.quantity} available)</option>)}</select></label> : <p className="master-stock-note">No colour selection required · {product.stock} available</p>}<div className={`detail-cart-actions gallery-cart-actions ${selectedCartEntry ? 'has-item' : ''}`}>{selectedCartEntry && <p className="detail-cart-status"><b>{selectedCartEntry.quantity}</b> in bag{selectedCartEntry.color ? ` · ${selectedCartEntry.color}` : ''}</p>}<button className="primary detail-add" disabled={!canAdd || (selectedCartEntry && selectedCartEntry.quantity >= selectedCartEntry.stock)} onClick={() => addToCart(product, selectedColor)}>{selectedCartEntry ? 'Add one more' : requiresColor ? 'Add selected colour' : 'Add to bag'} <Icon name="plus" size={16}/></button>{selectedCartEntry && <button className="detail-reduce" onClick={() => updateQuantity(cartLineKey(selectedCartEntry), -1)}>Reduce <Icon name="minus" size={14}/></button>}{selectedCartEntry && <button className="detail-remove" onClick={() => removeFromCart(cartLineKey(selectedCartEntry))}>Remove <Icon name="close" size={14}/></button>}</div></aside>
+        <aside className="gallery-product-details">{description.festive_note && <blockquote className="festive-note"><b>Festive note</b>{description.festive_note}</blockquote>}<span className="eyebrow">Product details</span><h2>{description.title || product.name}</h2><p>{description.catalogue_description || product.description}</p>{description.dimensions && <div><b>Dimensions</b><span>{description.dimensions}</span></div>}{description.color_description && <div><b>Colour</b><span>{description.color_description}</span></div>}{description.pattern_craft && <div><b>Pattern / craft</b><span>{description.pattern_craft}</span></div>}{usesColor && <label>Available colour<select value={selectedColor} onChange={(event) => chooseColor(event.target.value)}>{colorChoices.map((color) => <option value={color} key={color}>{color}</option>)}</select></label>}{usesSize && <label>Available size<select value={selectedSize} onChange={(event) => setSelectedSize(event.target.value)}>{sizeChoices.map((size) => <option value={size} key={size}>{size}</option>)}</select></label>}{!requiresVariant && <p className="master-stock-note">No option selection required · {product.stock} available</p>}<div className={`detail-cart-actions gallery-cart-actions ${selectedCartEntry ? 'has-item' : ''}`}>{selectedCartEntry && <p className="detail-cart-status"><b>{selectedCartEntry.quantity}</b> in bag{variantSummary(selectedCartEntry) ? ` · ${variantSummary(selectedCartEntry)}` : ''}</p>}<button className="primary detail-add" disabled={!canAdd || (selectedCartEntry && selectedCartEntry.quantity >= selectedCartEntry.stock)} onClick={() => addToCart(product, selectedVariant)}>{selectedCartEntry ? 'Add one more' : requiresVariant ? 'Add selected options' : 'Add to bag'} <Icon name="plus" size={16}/></button>{selectedCartEntry && <button className="detail-reduce" onClick={() => updateQuantity(cartLineKey(selectedCartEntry), -1)}>Reduce <Icon name="minus" size={14}/></button>}{selectedCartEntry && <button className="detail-remove" onClick={() => removeFromCart(cartLineKey(selectedCartEntry))}>Remove <Icon name="close" size={14}/></button>}</div></aside>
       </div>
     </div>}
   </article>
@@ -1090,7 +1114,7 @@ function ProductCard({ product, cartEntries, addToCart, updateQuantity, removeFr
 
 function CartDrawer({ cart, total, updateQuantity, close, checkout }) {
   return <aside className="cart-drawer" aria-label="Shopping bag"><div className="drawer-head"><div><span className="eyebrow">Your selection</span><h2>Shopping bag <small>{cart.length}</small></h2></div><button className="icon-button" onClick={close} aria-label="Close bag"><Icon name="close"/></button></div>
-    <div className="cart-items">{cart.length === 0 ? <div className="empty"><Icon name="bag" size={35}/><h3>Your bag is empty</h3><p>Beautiful things are waiting.</p></div> : cart.map((item) => <div className="cart-item" key={cartLineKey(item)}><OptimizedImage src={item.image} alt="" loading="lazy" width={88} height={102} sizes="88px"/><div className="cart-info"><h3>{item.name}</h3><p>{item.craft}</p>{item.color && <p className="cart-color"><b>Colour</b> {item.color}</p>}<div className="quantity"><button onClick={() => updateQuantity(cartLineKey(item), -1)} aria-label="Decrease quantity"><Icon name="minus" size={14}/></button><span>{item.quantity}</span><button onClick={() => updateQuantity(cartLineKey(item), 1)} aria-label="Increase quantity"><Icon name="plus" size={14}/></button></div></div><strong>S${item.price * item.quantity}</strong></div>)}</div>
+    <div className="cart-items">{cart.length === 0 ? <div className="empty"><Icon name="bag" size={35}/><h3>Your bag is empty</h3><p>Beautiful things are waiting.</p></div> : cart.map((item) => <div className="cart-item" key={cartLineKey(item)}><OptimizedImage src={item.image} alt="" loading="lazy" width={88} height={102} sizes="88px"/><div className="cart-info"><h3>{item.name}</h3><p>{item.craft}</p>{item.color && <p className="cart-color"><b>Colour</b> {item.color}</p>}{item.size && <p className="cart-color"><b>Size</b> {item.size}</p>}<div className="quantity"><button onClick={() => updateQuantity(cartLineKey(item), -1)} aria-label="Decrease quantity"><Icon name="minus" size={14}/></button><span>{item.quantity}</span><button onClick={() => updateQuantity(cartLineKey(item), 1)} aria-label="Increase quantity"><Icon name="plus" size={14}/></button></div></div><strong>S${item.price * item.quantity}</strong></div>)}</div>
     <div className="drawer-bottom"><p className="delivery-note"><Icon name="check" size={15}/> {LAUNCH_SPECIAL_MESSAGE}</p><div className="subtotal"><span>Subtotal</span><strong>S${total.toFixed(2)}</strong></div><small>Taxes included. Shipping calculated at checkout.</small><button className="primary full" disabled={!cart.length} onClick={checkout}>Continue to checkout <Icon name="arrow" size={18}/></button><button className="continue" onClick={close}>Continue shopping</button></div>
   </aside>
 }
@@ -1283,7 +1307,7 @@ export function LegacyCheckout({ cart, total, mode, setMode, user, isLoggedIn, o
 
 function OrderSummary({ cart, total }) {
   const delivery = deliveryChargeFor(total)
-  return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map(item => <div className="summary-item" key={cartLineKey(item)}><div><OptimizedImage src={item.image} alt="" loading="lazy" width={88} height={102} sizes="88px"/><b>{item.quantity}</b></div><p><strong>{item.name}</strong><span>{item.craft}{item.color ? ` · ${item.color}` : ''}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<p className="checkout-promotion"><Icon name="check" size={15}/> {LAUNCH_SPECIAL_MESSAGE}</p><div className="summary-lines"><p><span>Subtotal</span><b>S${total.toFixed(2)}</b></p><p><span>Delivery</span><b>{delivery === 0 ? 'Complimentary' : `S$${delivery.toFixed(2)}`}</b></p></div><div className="summary-total"><span>Total <small>SGD</small></span><strong>S${(total + delivery).toFixed(2)}</strong></div></aside>
+  return <aside className="order-summary"><div className="summary-head"><h2>Your order</h2><span>{cart.length} items</span></div>{cart.map(item => <div className="summary-item" key={cartLineKey(item)}><div><OptimizedImage src={item.image} alt="" loading="lazy" width={88} height={102} sizes="88px"/><b>{item.quantity}</b></div><p><strong>{item.name}</strong><span>{item.craft}{variantSummary(item) ? ` · ${variantSummary(item)}` : ''}</span></p><em>S${(item.price * item.quantity).toFixed(2)}</em></div>)}<p className="checkout-promotion"><Icon name="check" size={15}/> {LAUNCH_SPECIAL_MESSAGE}</p><div className="summary-lines"><p><span>Subtotal</span><b>S${total.toFixed(2)}</b></p><p><span>Delivery</span><b>{delivery === 0 ? 'Complimentary' : `S$${delivery.toFixed(2)}`}</b></p></div><div className="summary-total"><span>Total <small>SGD</small></span><strong>S${(total + delivery).toFixed(2)}</strong></div></aside>
 }
 
 export function LegacyLogin({ close, success, continueAsGuest }) {
@@ -1527,7 +1551,7 @@ function Orders({ products }) {
       {selectedOrder ? <article className="order-detail" aria-live="polite">
         <div className="order-detail-head"><div><span className="eyebrow">Order details</span><h2>{selectedOrder.order_number}</h2><p>Placed {new Date(selectedOrder.created_at).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' })}</p></div><strong className={`order-status ${String(selectedOrder.status).toLowerCase()}`}>{selectedOrder.status}</strong></div>
         <div className="order-detail-meta"><div><span>Payment</span><strong className={`order-payment ${String(selectedOrder.payment_status).toLowerCase()}`}>{selectedOrder.payment_status}</strong></div><div><span>Items</span><strong>{(selectedOrder.items || []).reduce((sum, item) => sum + Number(item.quantity), 0)}</strong></div><div><span>Total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div></div>
-        <div className="order-detail-items">{(selectedOrder.items || []).map((item) => <div className="order-detail-item" key={item.id}><OptimizedImage src={productImage(item.product_id)} alt="" loading="lazy" width={88} height={102} sizes="88px"/><div><strong>{item.product_name}</strong><span>Quantity {item.quantity}{item.color ? ` · Colour ${item.color}` : ''}</span>{selectedOrder.status==='DELIVERED'&&<button className="secondary" type="button" onClick={()=>requestSelectedAction('RETURN',item)}>Return this item</button>}</div><b>S${Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)).toFixed(2)}</b></div>)}</div>
+        <div className="order-detail-items">{(selectedOrder.items || []).map((item) => <div className="order-detail-item" key={item.id}><OptimizedImage src={productImage(item.product_id)} alt="" loading="lazy" width={88} height={102} sizes="88px"/><div><strong>{item.product_name}</strong><span>Quantity {item.quantity}{item.color ? ` · Colour ${item.color}` : ''}{item.size ? ` · Size ${item.size}` : ''}</span>{selectedOrder.status==='DELIVERED'&&<button className="secondary" type="button" onClick={()=>requestSelectedAction('RETURN',item)}>Return this item</button>}</div><b>S${Number(item.subtotal ?? Number(item.unit_price) * Number(item.quantity)).toFixed(2)}</b></div>)}</div>
         <div className="order-detail-total"><span>Order total</span><strong>S${Number(selectedOrder.total_amount).toFixed(2)}</strong></div>
         {notificationMessage && <p className="order-notification-message" role="status">{notificationMessage}</p>}
         <div className="order-history-actions"><button type="button" className="secondary" onClick={() => resendSelectedOrder('EMAIL')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_email}>{resendingOrderId ? 'Sending...' : 'Resend email'}</button><button type="button" className="secondary" onClick={() => resendSelectedOrder('SMS')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_phone}>Resend SMS</button>{WHATSAPP_ENABLED&&<button type="button" className="secondary" onClick={() => resendSelectedOrder('WHATSAPP')} disabled={Boolean(resendingOrderId)||!selectedOrder.contact_whatsapp}>Resend WhatsApp</button>}{['PENDING','CONFIRMED','PROCESSING'].includes(selectedOrder.status)&&<button type="button" className="secondary" onClick={()=>requestSelectedAction('CANCEL')}>Request cancellation</button>}{canRemoveSelectedOrder && <button type="button" className="secondary" onClick={removeSelectedOrder} disabled={removing}>{removing ? 'Removing...' : 'Remove from history'}</button>}</div>
